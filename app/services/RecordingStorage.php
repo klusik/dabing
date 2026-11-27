@@ -137,6 +137,8 @@ final class RecordingStorage
                 || $sampleRateIndex === 3) {
                 return false;
             }
+            // Header bit fields, bitrate tables, sample rates, and frame coefficients
+            // follow MPEG Audio Layer III frame encoding rules.
             $mpegOneBitrates = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
             $mpegTwoBitrates = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
             $sampleRates = [44100, 48000, 32000];
@@ -155,7 +157,9 @@ final class RecordingStorage
         } finally {
             fclose($stream);
         }
-    }    /**
+    }
+
+    /**
      * Delete a staged or obsolete file when present.
      *
      * @param string $key Random 64-character storage key.

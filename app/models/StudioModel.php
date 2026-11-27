@@ -26,6 +26,13 @@ final class StudioModel
     private const PROJECT_PAGE_SIZE = 80;
 
     /**
+     * Type: int; Units: lines per statement; Scope: one project import;
+     * Consumers: createProject(); Rationale: reduce database round trips while
+     * keeping each four-parameter row batch bounded to 800 placeholders.
+     */
+    private const LINE_INSERT_BATCH_SIZE = 200;
+
+    /**
      * Create the persistence model.
      *
      * @param PDO $database Shared configured database connection.
@@ -97,11 +104,6 @@ final class StudioModel
                 'INSERT INTO dabing_project_chapters (project_id, position, title)
                  VALUES (?, ?, ?)'
             );
-            $lineInsert = $this->database->prepare(
-                'INSERT INTO dabing_script_lines
-                    (chapter_id, position, character_name, text)
-                 VALUES (?, ?, ?, ?)'
-            );
             foreach ($script['chapters'] as $chapterIndex => $chapter) {
                 $chapterInsert->execute([
                     $projectId,
@@ -109,13 +111,30 @@ final class StudioModel
                     $chapter['title'],
                 ]);
                 $chapterId = (int) $this->database->lastInsertId();
-                foreach ($chapter['lines'] as $lineIndex => $line) {
-                    $lineInsert->execute([
-                        $chapterId,
-                        $lineIndex + 1,
-                        $line['character'],
-                        $line['text'],
-                    ]);
+                foreach (array_chunk(
+                    $chapter['lines'],
+                    self::LINE_INSERT_BATCH_SIZE
+                ) as $batchIndex => $lineBatch) {
+                    $rowCount = count($lineBatch);
+                    $valuesSql = implode(
+                        ', ',
+                        array_fill(0, $rowCount, '(?, ?, ?, ?)')
+                    );
+                    $lineInsert = $this->database->prepare(
+                        'INSERT INTO dabing_script_lines
+                            (chapter_id, position, character_name, text)
+                         VALUES ' . $valuesSql
+                    );
+                    $parameters = [];
+                    $firstPosition = ($batchIndex
+                        * self::LINE_INSERT_BATCH_SIZE) + 1;
+                    foreach ($lineBatch as $batchOffset => $line) {
+                        $parameters[] = $chapterId;
+                        $parameters[] = $firstPosition + $batchOffset;
+                        $parameters[] = $line['character'];
+                        $parameters[] = $line['text'];
+                    }
+                    $lineInsert->execute($parameters);
                 }
             }
             $this->database->commit();
