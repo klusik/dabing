@@ -34,6 +34,9 @@ use Dabing\Http;
             <?php if ($user): ?>
                 <a class="icon-control" href="<?= Http::escape(Http::url('projects')) ?>" aria-label="Moje knihy" title="Moje knihy"><span aria-hidden="true">▦</span></a>
                 <a class="icon-control" href="<?= Http::escape(Http::url('account')) ?>" aria-label="Účet <?= Http::escape((string) $user['name']) ?>" title="Účet"><span aria-hidden="true">♙</span></a>
+                <?php if (!empty($user['is_admin'])): ?>
+                    <a class="icon-control" href="<?= Http::escape(Http::url('update')) ?>" aria-label="Aktualizace" title="Aktualizace"><span aria-hidden="true">⟳</span></a>
+                <?php endif; ?>
                 <form method="post" action="<?= Http::escape(Http::url('logout')) ?>" class="nav-form">
                     <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
                     <button class="icon-control" type="submit" aria-label="Odhlásit se" title="Odhlásit se"><span aria-hidden="true">↪</span></button>

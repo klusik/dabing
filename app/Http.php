@@ -18,11 +18,21 @@ namespace Dabing;
 /** Centralizes transport helpers without resolving user input to file paths. */
 final class Http
 {
+    /** @var string|null Canonical browser-visible application base URL. */
+    private static ?string $configuredPublicBase = null;
+
     /** Maximum accepted uploaded file size before service-level validation.
      * Type: int; Units: bytes; Scope: one normalized PHP upload; Consumers: file();
      * Rationale: keep request metadata bounded at the HTTP boundary.
      */
     private const MAX_NORMALIZED_FILE_BYTES = 52428800;
+
+    /** Maximum percent-decoding passes used to detect hidden path segments.
+     * Type: int; Units: passes; Scope: public base URL path validation;
+     * Consumers: normalizePublicBaseUrl(); Rationale: catch nested encoding
+     * without unbounded decoding.
+     */
+    private const MAX_PATH_DECODE_PASSES = 5;
 
     /** Start a hardened session and apply response security headers.
      * @return void No return value.
@@ -190,12 +200,106 @@ final class Http
         return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
+    /** Normalize a configured public HTTP(S) base URL.
+     * @param string $value Operator-provided public base URL.
+     * @return string|null Safe URL without a trailing slash, or null if invalid.
+     */
+    public static function normalizePublicBaseUrl(string $value): ?string
+    {
+        $value = trim($value);
+        if ($value === '' || str_contains($value, '\\')
+            || preg_match('/[\x00-\x20\x7f]/', $value) === 1) {
+            return null;
+        }
+        $parts = parse_url($value);
+        if (!is_array($parts) || !isset($parts['scheme'], $parts['host'])
+            || !in_array(strtolower((string) $parts['scheme']), ['http', 'https'], true)
+            || isset($parts['user']) || isset($parts['pass'])
+            || isset($parts['query']) || isset($parts['fragment'])) {
+            return null;
+        }
+
+        $scheme = strtolower((string) $parts['scheme']);
+        $host = strtolower((string) $parts['host']);
+        $isIpv6 = str_contains($host, ':');
+        if ($isIpv6) {
+            if (filter_var(trim($host, '[]'), FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) === false) {
+                return null;
+            }
+            $host = '[' . trim($host, '[]') . ']';
+        } elseif (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false
+            && (strlen($host) > 253
+                || preg_match('/\A(?=.{1,253}\z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*\z/i', $host) !== 1)) {
+            return null;
+        }
+
+        $port = isset($parts['port']) ? (int) $parts['port'] : null;
+        if ($port !== null && ($port < 1 || $port > 65535)) {
+            return null;
+        }
+        $authority = $host;
+        if ($port !== null && !(($scheme === 'http' && $port === 80)
+            || ($scheme === 'https' && $port === 443))) {
+            $authority .= ':' . $port;
+        }
+
+        $path = (string) ($parts['path'] ?? '');
+        if ($path !== '' && !str_starts_with($path, '/')) {
+            return null;
+        }
+        $path = preg_replace('~/+~', '/', $path) ?? $path;
+        $path = rtrim($path, '/');
+        $decodedPath = $path;
+        for ($pass = 0; $pass < self::MAX_PATH_DECODE_PASSES; $pass++) {
+            if (preg_match('/%(?![a-f0-9]{2})/i', $decodedPath) === 1) {
+                return null;
+            }
+            $nextPath = rawurldecode($decodedPath);
+            if ($nextPath === $decodedPath) {
+                break;
+            }
+            $decodedPath = $nextPath;
+        }
+        if (rawurldecode($decodedPath) !== $decodedPath) {
+            return null;
+        }
+        if (str_contains($decodedPath, '\\') || preg_match('/[\x00-\x20\x7f]/', $decodedPath) === 1) {
+            return null;
+        }
+        foreach (explode('/', trim($decodedPath, '/')) as $segment) {
+            if ($segment === '.' || $segment === '..'
+                || strcasecmp($segment, 'subdom') === 0) {
+                return null;
+            }
+        }
+        return $scheme . '://' . $authority . $path;
+    }
+
+    /** Configure or clear the canonical browser-visible base URL.
+     * @param string|null $url Already normalized base URL, or null to clear it.
+     * @return void No return value.
+     */
+    public static function configurePublicBase(?string $url): void
+    {
+        self::$configuredPublicBase = $url === null
+            ? null
+            : self::normalizePublicBaseUrl($url);
+    }
+
+    /** Return the configured canonical public base URL.
+     * @return string|null Normalized URL or null when unset/invalid.
+     */
+    public static function publicBaseUrl(): ?string
+    {
+        return self::$configuredPublicBase;
+    }
+
     /** Build a query-only URL for a known route and scalar parameters.
      * @param string $route Allowlisted route name.
      * @param array<string,int|string> $params Scalar query parameters.
-     * @return string Relative query URL.
+     * @return string Query-only URL beginning with route.
      */
-    public static function url(string $route, array $params = []): string
+    public static function routeQuery(string $route, array $params = []): string
     {
         $query = ['route' => $route];
         foreach ($params as $key => $value) {
@@ -207,17 +311,36 @@ final class Http
         return '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
     }
 
+    /** Build an application route URL using the public base when configured.
+     * @param string $route Allowlisted route name.
+     * @param array<string,int|string> $params Scalar query parameters.
+     * @return string Canonical absolute URL or safe query-only fallback.
+     */
+    public static function url(string $route, array $params = []): string
+    {
+        $query = self::routeQuery($route, $params);
+        if (self::$configuredPublicBase !== null) {
+            return self::$configuredPublicBase . '/' . $query;
+        }
+        return $query;
+    }
+
     /** Build a safe static asset URL.
      * @param string $filename Simple public asset filename.
-     * @return string Relative URL to an asset or an empty asset URL on invalid input.
+     * @return string Public URL to an asset or an empty asset URL on invalid input.
      */
     public static function asset(string $filename): string
     {
         if (preg_match('/\A[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\z/', $filename) !== 1
             || str_contains($filename, '..')) {
-            return './public/assets/';
+            return self::$configuredPublicBase === null
+                ? './public/assets/'
+                : self::$configuredPublicBase . '/public/assets/';
         }
-        return './public/assets/' . rawurlencode($filename);
+        $assetPath = '/public/assets/' . rawurlencode($filename);
+        return self::$configuredPublicBase === null
+            ? '.' . $assetPath
+            : self::$configuredPublicBase . $assetPath;
     }
 
     /** Store one typed flash notice for the next rendered page.
@@ -237,7 +360,7 @@ final class Http
     /** Render one fixed application view inside the shared layout.
      * @param string $view Fixed view key, never a path.
      * @param string $title Page title.
-     * @param array{errors?:list<string>,values?:array{db_host?:string,db_port?:string,db_name?:string,db_user?:string,name?:string,email?:string},keyReady?:bool,db_host?:string,db_port?:string,db_name?:string,db_user?:string,name?:string,email?:string,projects?:list<array{id:int,title:string,role:string,created_at:string,line_count:int,recording_count:int}>,max_script_bytes?:int,max_script_paste_bytes?:int,project?:array{id:int,title:string,role:string},chapters?:list<array{id:int,title:string,lines:list<array{id:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,number:int,can_record:bool,assigned_name:?string,takes:list<array{id:int,user_id:int,user_name:string,created_at:string,is_selected:bool,can_delete:bool,attempt_no:int,media_type:string,file_name:string,audio_url:string,download_url:string}>}>}>,members?:list<array{id:int,name:string,role:string}>,voices?:list<array{character:string,assigned_user_id:?int,assigned_name:?string}>,pagination?:array{page:int,pages:int,total:int},playlist?:list<array{recording_id:int,line_number:int,character:string,chapter_title:string,attempt_no:int,media_type:string,file_name:string,audio_url:string,download_url:string}>,can_invite?:bool,has_recordings?:bool,export_url?:string,invite_url?:string,token?:string,valid?:bool,invite_valid?:bool,existing_account?:bool,recipient_email?:string,project_title?:string,code?:string,status?:int,message?:string} $data Prepared view data.
+     * @param array{errors?:list<string>,values?:array{db_host?:string,db_port?:string,db_name?:string,db_user?:string,name?:string,email?:string},keyReady?:bool,db_host?:string,db_port?:string,db_name?:string,db_user?:string,name?:string,email?:string,projects?:list<array{id:int,title:string,role:string,created_at:string,line_count:int,recording_count:int}>,max_script_bytes?:int,max_script_paste_bytes?:int,project?:array{id:int,title:string,role:string},chapters?:list<array{id:int,title:string,lines:list<array{id:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,number:int,can_record:bool,assigned_name:?string,takes:list<array{id:int,user_id:int,user_name:string,created_at:string,is_selected:bool,can_delete:bool,attempt_no:int,media_type:string,file_name:string,audio_url:string,download_url:string}>}>}>,members?:list<array{id:int,name:string,role:string}>,voices?:list<array{character:string,assigned_user_id:?int,assigned_name:?string}>,pagination?:array{page:int,pages:int,total:int},playlist?:list<array{recording_id:int,line_number:int,character:string,chapter_title:string,attempt_no:int,media_type:string,file_name:string,audio_url:string,download_url:string}>,current_version?:string,latest_release?:array{version:string,url:string,sha256:string,size:int}|null,can_invite?:bool,has_recordings?:bool,export_url?:string,invite_url?:string,token?:string,valid?:bool,invite_valid?:bool,existing_account?:bool,recipient_email?:string,project_title?:string,code?:string,status?:int,message?:string} $data Prepared view data.
      * @param array{id:int,name:string,email:string,is_admin:bool}|null $user Authenticated user or null.
      * @param int $status HTTP response status.
      * @return void No return value.
@@ -254,7 +377,7 @@ final class Http
             'account' => 'account.php',
             'register' => 'register.php', 'projects' => 'projects.php',
             'project' => 'project.php', 'join' => 'join.php', 'email-join' => 'email-invite-join.php',
-            'error' => 'error.php',
+            'update' => 'update.php', 'error' => 'error.php',
         ];
         if (!isset($templates[$view])) {
             throw new HttpError(500, 'Šablona stránky není dostupná.');
@@ -272,7 +395,7 @@ final class Http
         require dirname(__DIR__) . '/app/views/layout.php';
     }
 
-    /** Send a relative 303 redirect to an allowlisted route.
+    /** Send a 303 redirect to an allowlisted route.
      * @param string $route Allowlisted route name.
      * @param array<string,int|string> $params Scalar query parameters.
      * @return never Does not return.
@@ -282,21 +405,7 @@ final class Http
         if (headers_sent()) {
             exit;
         }
-        $requestUri = $_SERVER['REQUEST_URI'] ?? null;
-        $path = null;
-        if (is_string($requestUri)
-            && str_starts_with($requestUri, '/')
-            && !str_starts_with($requestUri, '//')
-            && preg_match('/[\x00-\x20\x7f\\\\]/', $requestUri) !== 1
-            && preg_match('/%(?![A-Fa-f0-9]{2})/', $requestUri) !== 1) {
-            $parsedPath = parse_url($requestUri, PHP_URL_PATH);
-            if (is_string($parsedPath) && str_starts_with($parsedPath, '/')
-                && !str_starts_with($parsedPath, '//')) {
-                $path = $parsedPath;
-            }
-        }
-        $base = $path ?? './';
-        header('Location: ' . $base . self::url($route, $params), true, 303);
+        header('Location: ' . self::url($route, $params), true, 303);
         exit;
     }
 

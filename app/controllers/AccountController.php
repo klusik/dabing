@@ -36,7 +36,7 @@ final class AccountController
         }
         $values = [
             'db_host' => 'localhost', 'db_port' => '3306', 'db_name' => '',
-            'db_user' => '', 'name' => '', 'email' => '',
+            'db_user' => '', 'base_url' => '', 'name' => '', 'email' => '',
         ];
         $errors = [];
         if (Http::method() === 'POST') {
@@ -45,6 +45,7 @@ final class AccountController
                 'install_key' => Http::post('install_key'),
                 'db_host' => Http::post('db_host'), 'db_port' => Http::post('db_port'),
                 'db_name' => Http::post('db_name'), 'db_user' => Http::post('db_user'),
+                'base_url' => Http::post('base_url'),
                 'db_password' => Http::post('db_password', false),
                 'setup_user' => Http::post('setup_user'),
                 'setup_password' => Http::post('setup_password', false),

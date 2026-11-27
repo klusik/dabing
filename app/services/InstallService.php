@@ -102,8 +102,46 @@ final class InstallService
         return $this->connection;
     }
 
+    /** Return the configured public origin for generated links.
+     * Legacy installations without this setting return null.
+     * @return string|null Normalized public origin or null when unset/unavailable.
+     */
+    public function publicBaseUrl(): ?string
+    {
+        $config = $this->readConfig();
+        return $config['base_url'] ?? null;
+    }
+
+    /** Connect to the installed database with temporary schema-change credentials.
+     *
+     * The host, port, and database name come only from the protected installed
+     * configuration. The supplied username and password are used for this
+     * connection only and are never written to configuration or returned.
+     *
+     * @param string $dbUser Temporary database account with migration privileges.
+     * @param string $dbPassword Temporary database password for this request.
+     * @return PDO Connected schema-capable database handle.
+     * @throws FormError When the installed config or temporary credentials fail.
+     */
+    public function migrationDatabase(string $dbUser, string $dbPassword): PDO
+    {
+        $user = trim($dbUser);
+        $config = $this->readConfig();
+        if ($user === '' || $config === null) {
+            throw new FormError('Zadejte platný účet pro změnu schématu databáze.');
+        }
+        $runtime = $config['runtime'];
+        $runtime['user'] = $user;
+        $runtime['password'] = $dbPassword;
+        try {
+            return self::connect($runtime);
+        } catch (Throwable $error) {
+            throw new FormError('Databázi se nepodařilo otevřít pro aktualizaci schématu.');
+        }
+    }
+
     /** Complete first-run setup under an exclusive lock.
-     * @param array{install_key:string,db_host:string,db_port:string,db_name:string,db_user:string,db_password:string,setup_user:string,setup_password:string,name:string,email:string,password:string,password_confirm:string} $input Validated form fields.
+     * @param array{install_key:string,db_host:string,db_port:string,db_name:string,db_user:string,db_password:string,setup_user:string,setup_password:string,name:string,email:string,password:string,password_confirm:string,base_url?:string} $input Validated form fields; base_url is optional for legacy callers.
      * @return void No return value.
      * @throws FormError When submitted setup data is invalid.
      */
@@ -125,6 +163,12 @@ final class InstallService
                 || !hash_equals(trim($key), trim($input['install_key']))) {
                 throw new FormError('Instalační klíč není správný.');
             }
+            $baseUrlInput = trim($input['base_url'] ?? '');
+            $baseUrl = $baseUrlInput === ''
+                ? null : Http::normalizePublicBaseUrl($baseUrlInput);
+            if ($baseUrlInput !== '' && $baseUrl === null) {
+                throw new FormError('Zadejte platnou veřejnou adresu webu.');
+            }
             $config = self::databaseConfig($input, 'runtime');
             $runtime = self::connect($config);
             $setupUser = trim($input['setup_user']);
@@ -139,6 +183,10 @@ final class InstallService
             $model->applySchema($this->schemaDirectory . DIRECTORY_SEPARATOR . 'accounts.sql');
             $model->applySchema($this->schemaDirectory . DIRECTORY_SEPARATOR . 'studio.sql');
             $model->applySchema($this->schemaDirectory . DIRECTORY_SEPARATOR . 'email-invites.sql');
+            $migrations = UpdateMigrationService::discover(
+                $this->schemaDirectory . DIRECTORY_SEPARATOR . 'migrations'
+            );
+            (new UpdateMigrationService($runtime))->apply($migrations, $ddl);
             $email = mb_strtolower(trim($input['email']));
             if (filter_var($email, FILTER_VALIDATE_EMAIL) === false
                 || strlen($email) > 254) {
@@ -163,7 +211,11 @@ final class InstallService
                 || !password_verify($input['password'], $account['password_hash'])) {
                 throw new HttpError(409, 'Instalaci nelze bezpečně obnovit.');
             }
-            $this->writeConfig(['runtime' => $config]);
+            $savedConfig = ['runtime' => $config];
+            if ($baseUrl !== null) {
+                $savedConfig['base_url'] = $baseUrl;
+            }
+            $this->writeConfig($savedConfig);
             $this->connection = $runtime;
         } finally {
             flock($handle, LOCK_UN);
@@ -213,7 +265,7 @@ final class InstallService
     }
 
     /** Read and validate protected runtime configuration.
-     * @return array{runtime:array{host:string,port:int,name:string,user:string,password:string}}|null Config or null when absent/corrupt.
+     * @return array{runtime:array{host:string,port:int,name:string,user:string,password:string},base_url?:string}|null Config or null when absent/corrupt.
      */
     private function readConfig(): ?array
     {
@@ -239,15 +291,29 @@ final class InstallService
         if ((int) $runtime['port'] < 1 || (string) $runtime['host'] === '') {
             return null;
         }
-        return ['runtime' => [
+        $validated = ['runtime' => [
             'host' => (string) $runtime['host'], 'port' => (int) $runtime['port'],
             'name' => (string) $runtime['name'], 'user' => (string) $runtime['user'],
             'password' => (string) $runtime['password'],
         ]];
+        if (array_key_exists('base_url', $config)) {
+            if (!is_string($config['base_url'])) {
+                return null;
+            }
+            $baseUrlInput = trim($config['base_url']);
+            if ($baseUrlInput !== '') {
+                $baseUrl = Http::normalizePublicBaseUrl($baseUrlInput);
+                if ($baseUrl === null) {
+                    return null;
+                }
+                $validated['base_url'] = $baseUrl;
+            }
+        }
+        return $validated;
     }
 
     /** Write runtime config by atomic rename with restrictive file mode.
-     * @param array{runtime:array{host:string,port:int,name:string,user:string,password:string}} $config Runtime-only configuration.
+     * @param array{runtime:array{host:string,port:int,name:string,user:string,password:string},base_url?:string} $config Runtime database settings and optional canonical public origin.
      * @return void No return value.
      */
     private function writeConfig(array $config): void
