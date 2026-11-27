@@ -10,8 +10,8 @@ use PDO;
  * Repository: klusik/dabing
  * File: app/models/StudioModel.php
  * Module Type: Model
- * Purpose: Persist studio projects, membership, invites, script lines, and takes.
- * Responsibilities: Own SQL queries and map database rows for studio services.
+ * Purpose: Persist private studio projects, role grants, script lines, and takes.
+ * Responsibilities: Own SQL queries and map rows for studio services.
  * Author: Rudolf Klusal
  * License: All rights reserved.
  */
@@ -46,15 +46,15 @@ final class StudioModel
      * List projects accessible to one user.
      *
      * @param int $userId Authenticated user identifier.
+     * @param bool $isAdmin Whether the authenticated user has global administrator access.
      * @return list<array{id:int,title:string,role:string,created_at:string,line_count:int,recording_count:int}>
      *     Project summary rows in newest-first order.
      */
-    public function projectsForUser(int $userId): array
+    public function projectsForUser(int $userId, bool $isAdmin = false): array
     {
         $statement = $this->database->prepare(
             'SELECT p.id, p.title, p.created_at,
-                    CASE WHEN p.owner_user_id = :owner THEN \'owner\'
-                         ELSE \'member\' END AS role,
+                    CASE WHEN :admin_role = 1 THEN \'owner\' ELSE \'member\' END AS role,
                     (SELECT COUNT(*) FROM dabing_project_chapters c
                      JOIN dabing_script_lines l ON l.chapter_id = c.id
                      WHERE c.project_id = p.id) AS line_count,
@@ -63,11 +63,16 @@ final class StudioModel
                      JOIN dabing_project_chapters c ON c.id = l.chapter_id
                      WHERE c.project_id = p.id) AS recording_count
              FROM dabing_projects p
-             JOIN dabing_project_members m ON m.project_id = p.id
-             WHERE m.user_id = :member
+             WHERE (:admin_access = 1 OR EXISTS (SELECT 1 FROM dabing_voice_assignments a
+                               WHERE a.project_id = p.id
+                                 AND a.user_id = :member))
              ORDER BY p.created_at DESC, p.id DESC'
         );
-        $statement->execute(['owner' => $userId, 'member' => $userId]);
+        $statement->execute([
+            'member' => $userId,
+            'admin_role' => $isAdmin ? 1 : 0,
+            'admin_access' => $isAdmin ? 1 : 0,
+        ]);
         $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
         return array_map(static fn (array $row): array => [
             'id' => (int) $row['id'],
@@ -77,6 +82,29 @@ final class StudioModel
             'line_count' => (int) $row['line_count'],
             'recording_count' => (int) $row['recording_count'],
         ], $rows);
+    }
+
+    /**
+     * Return exact, case-sensitive script roles in one project.
+     *
+     * @param int $projectId Requested project identifier.
+     * @return list<string> Distinct roles in script order.
+     */
+    public function projectRoles(int $projectId): array
+    {
+        $statement = $this->database->prepare(
+            'SELECT character_name
+             FROM dabing_script_lines l
+             JOIN dabing_project_chapters c ON c.id = l.chapter_id
+             WHERE c.project_id = ?
+             GROUP BY CAST(l.character_name AS BINARY), l.character_name
+             ORDER BY MIN(c.position), MIN(l.position), MIN(l.id)'
+        );
+        $statement->execute([$projectId]);
+        return array_map(
+            static fn (mixed $role): string => (string) $role,
+            $statement->fetchAll(PDO::FETCH_COLUMN)
+        );
     }
 
     /**
@@ -96,10 +124,6 @@ final class StudioModel
             $project->execute([$ownerId, $script['title']]);
             $projectId = (int) $this->database->lastInsertId();
 
-            $member = $this->database->prepare(
-                'INSERT INTO dabing_project_members (project_id, user_id) VALUES (?, ?)'
-            );
-            $member->execute([$projectId, $ownerId]);
             $chapterInsert = $this->database->prepare(
                 'INSERT INTO dabing_project_chapters (project_id, position, title)
                  VALUES (?, ?, ?)'
@@ -148,40 +172,26 @@ final class StudioModel
     }
 
     /**
-     * Check whether a user owns a project without loading its script.
-     *
-     * @param int $projectId Requested project identifier.
-     * @param int $userId Authenticated user identifier.
-     * @return bool True only for the project owner.
-     */
-    public function isOwner(int $projectId, int $userId): bool
-    {
-        $statement = $this->database->prepare(
-            'SELECT 1 FROM dabing_projects
-             WHERE id = ? AND owner_user_id = ?'
-        );
-        $statement->execute([$projectId, $userId]);
-        return $statement->fetchColumn() !== false;
-    }
-
-    /**
      * Fetch the current project page, complete playlist, and project-wide voices.
      *
      * @param int $projectId Requested project identifier.
      * @param int $userId Authenticated viewer identifier.
      * @param int $requestedPage One-based visible script page.
-     * @return array{project:array{id:int,title:string,role:string},chapters:list<array{id:int,title:string,lines:list<array{id:int,number:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,assigned_name:?string,can_record:bool,takes:list<array{id:int,attempt_no:int,media_type:string,user_id:int,user_name:string,created_at:string,is_selected:bool,can_delete:bool}>}>}>,members:list<array{id:int,name:string,role:string}>,voices:list<array{character:string,assigned_user_id:?int,assigned_name:?string}>,playlist:list<array{recording_id:int,line_number:int,character:string,chapter_title:string,attempt_no:int,media_type:string}>,pagination:array{page:int,pages:int,total:int},has_recordings:bool}|null
+     * @param bool $isAdmin Whether the authenticated user has global administrator access.
+     * @param bool $myTakesOnly Whether to page roles assigned to the viewer.
+     * @return array{project:array{id:int,title:string,role:string},chapters:list<array{id:int,title:string,lines:list<array{id:int,number:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,assigned_name:?string,can_record:bool,takes:list<array{id:int,attempt_no:int,media_type:string,user_id:?int,user_name:string,created_at:string,is_selected:bool,can_delete:bool}>}>}>,members:list<array{id:int,name:string,is_active:bool,role:string}>,voices:list<array{character:string,assigned_user_id:?int,assigned_name:?string,assigned_users:list<int>}>,playlist:list<array{recording_id:int,line_number:int,character:string,chapter_title:string,attempt_no:int,media_type:string}>,pagination:array{page:int,pages:int,total:int},has_recordings:bool}|null
      *     Ordered page and playback data, or null when access is not allowed.
      */
     public function projectView(
         int $projectId,
         int $userId,
-        int $requestedPage = 1
+        int $requestedPage = 1,
+        bool $isAdmin = false,
+        bool $myTakesOnly = false
     ): ?array {
         $projectQuery = $this->database->prepare(
-            'SELECT p.id, p.title, p.owner_user_id,
-                    CASE WHEN p.owner_user_id = :owner THEN \'owner\'
-                         ELSE \'member\' END AS role,
+            'SELECT p.id, p.title,
+                    CASE WHEN :admin_role = 1 THEN \'owner\' ELSE \'member\' END AS role,
                     EXISTS (
                         SELECT 1 FROM dabing_recordings any_recording
                         JOIN dabing_script_lines any_line
@@ -191,26 +201,42 @@ final class StudioModel
                         WHERE any_chapter.project_id = p.id
                     ) AS has_recordings
              FROM dabing_projects p
-             JOIN dabing_project_members m ON m.project_id = p.id
-             WHERE p.id = :project AND m.user_id = :member'
+             WHERE p.id = :project AND (:admin_access = 1 OR EXISTS (SELECT 1 FROM dabing_voice_assignments grant_role
+                          WHERE grant_role.project_id = p.id
+                            AND grant_role.user_id = :member))'
         );
         $projectQuery->execute([
-            'owner' => $userId,
             'project' => $projectId,
             'member' => $userId,
+            'admin_role' => $isAdmin ? 1 : 0,
+            'admin_access' => $isAdmin ? 1 : 0,
         ]);
         $projectRow = $projectQuery->fetch(PDO::FETCH_ASSOC);
         if (!is_array($projectRow)) {
             return null;
         }
 
-        $totalQuery = $this->database->prepare(
-            'SELECT COUNT(*)
-             FROM dabing_script_lines l
-             JOIN dabing_project_chapters c ON c.id = l.chapter_id
-             WHERE c.project_id = ?'
-        );
-        $totalQuery->execute([$projectId]);
+        if ($myTakesOnly) {
+            $totalQuery = $this->database->prepare(
+                'SELECT COUNT(DISTINCT l.id)
+                 FROM dabing_script_lines l
+                 JOIN dabing_project_chapters c ON c.id = l.chapter_id
+                 WHERE c.project_id = ? AND EXISTS (
+                     SELECT 1 FROM dabing_voice_assignments a
+                     WHERE a.project_id = c.project_id AND a.user_id = ?
+                       AND CAST(a.character_name AS BINARY)
+                           = CAST(l.character_name AS BINARY))'
+            );
+            $totalQuery->execute([$projectId, $userId]);
+        } else {
+            $totalQuery = $this->database->prepare(
+                'SELECT COUNT(*)
+                 FROM dabing_script_lines l
+                 JOIN dabing_project_chapters c ON c.id = l.chapter_id
+                 WHERE c.project_id = ?'
+            );
+            $totalQuery->execute([$projectId]);
+        }
         $totalLines = (int) $totalQuery->fetchColumn();
         $pages = max(1, (int) ceil($totalLines / self::PROJECT_PAGE_SIZE));
         $page = max(1, min($requestedPage, $pages));
@@ -242,6 +268,12 @@ final class StudioModel
                  FROM dabing_script_lines l
                  JOIN dabing_project_chapters c ON c.id = l.chapter_id
                  WHERE c.project_id = :project
+                   AND (:my_takes = 0 OR EXISTS (
+                       SELECT 1 FROM dabing_voice_assignments own_role
+                       WHERE own_role.project_id = c.project_id
+                         AND own_role.user_id = :take_user
+                         AND CAST(own_role.character_name AS BINARY)
+                             = CAST(l.character_name AS BINARY)))
                  ORDER BY c.position, c.id, l.position, l.id
                  LIMIT :page_size OFFSET :page_offset
              ) page_line
@@ -256,6 +288,8 @@ final class StudioModel
         $lineQuery->bindValue('project', $projectId, PDO::PARAM_INT);
         $lineQuery->bindValue('page_size', self::PROJECT_PAGE_SIZE, PDO::PARAM_INT);
         $lineQuery->bindValue('page_offset', $offset, PDO::PARAM_INT);
+        $lineQuery->bindValue('my_takes', $myTakesOnly ? 1 : 0, PDO::PARAM_INT);
+        $lineQuery->bindValue('take_user', $userId, PDO::PARAM_INT);
         $lineQuery->execute();
         $chapters = [];
         $chapterIndexes = [];
@@ -296,44 +330,51 @@ final class StudioModel
                     'id' => (int) $row['recording_id'],
                     'attempt_no' => (int) $row['attempt_no'],
                     'media_type' => (string) $row['media_type'],
-                    'user_id' => (int) $row['recording_user_id'],
-                    'user_name' => (string) $row['user_name'],
+                    'user_id' => $row['recording_user_id'] === null
+                        ? null : (int) $row['recording_user_id'],
+                    'user_name' => is_string($row['user_name']) ? (string) $row['user_name'] : 'Smazaný uživatel',
                     'created_at' => (string) $row['created_at'],
                     'is_selected' => (int) $row['recording_id']
                         === (int) ($row['selected_recording_id'] ?? 0),
-                    'can_delete' => $project['role'] === 'owner'
-                        || (int) $row['recording_user_id'] === $userId,
+                    'can_delete' => $isAdmin
+                        || ($row['recording_user_id'] !== null
+                            && (int) $row['recording_user_id'] === $userId),
                 ];
             }
         }
 
         $membersQuery = $this->database->prepare(
-            'SELECT u.id, u.name, CASE WHEN u.id = p.owner_user_id
-                    THEN \'owner\' ELSE \'member\' END AS role
-             FROM dabing_project_members m
-             JOIN dabing_users u ON u.id = m.user_id
-             JOIN dabing_projects p ON p.id = m.project_id
-             WHERE m.project_id = ? ORDER BY role, u.name, u.id'
+            'SELECT u.id, u.name, u.is_active,
+                    GROUP_CONCAT(a.character_name ORDER BY a.character_name
+                                 SEPARATOR \' · \') AS role
+             FROM dabing_voice_assignments a
+             JOIN dabing_users u ON u.id = a.user_id
+             WHERE a.project_id = ?
+             GROUP BY u.id, u.name, u.is_active ORDER BY u.name, u.id'
         );
         $membersQuery->execute([$projectId]);
         $members = array_map(static fn (array $row): array => [
             'id' => (int) $row['id'],
             'name' => (string) $row['name'],
+            'is_active' => (int) $row['is_active'] === 1,
             'role' => (string) $row['role'],
         ], $membersQuery->fetchAll(PDO::FETCH_ASSOC));
 
         $assignmentQuery = $this->database->prepare(
             'SELECT a.character_name, a.user_id, u.name AS assigned_name
              FROM dabing_voice_assignments a
-             JOIN dabing_users u ON u.id = a.user_id
+             LEFT JOIN dabing_users u ON u.id = a.user_id
              WHERE a.project_id = ? ORDER BY a.character_name'
         );
         $assignmentQuery->execute([$projectId]);
         $assignments = [];
         foreach ($assignmentQuery->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $assignments[bin2hex((string) $row['character_name'])] = [
+            $key = bin2hex((string) $row['character_name']);
+            $assignments[$key] ??= [];
+            $assignments[$key][] = [
                 'assigned_user_id' => (int) $row['user_id'],
-                'assigned_name' => (string) $row['assigned_name'],
+                'assigned_name' => is_string($row['assigned_name'])
+                    ? (string) $row['assigned_name'] : 'Smazaný uživatel',
             ];
         }
 
@@ -352,28 +393,29 @@ final class StudioModel
             $lineNumbers[(string) $row['id']] = $lineNumber;
             $character = (string) $row['character_name'];
             $voiceKey = bin2hex($character);
-            $assignment = $assignments[$voiceKey] ?? [
-                'assigned_user_id' => null,
-                'assigned_name' => null,
+            $assignment = $assignments[$voiceKey][0] ?? [
+                'assigned_user_id' => null, 'assigned_name' => null,
             ];
             $voicesByName[$voiceKey] ??= [
                 'character' => $character,
                 'assigned_user_id' => $assignment['assigned_user_id'],
                 'assigned_name' => $assignment['assigned_name'],
+                'assigned_users' => array_map(
+                    static fn (array $assigned): int => $assigned['assigned_user_id'],
+                    $assignments[$voiceKey] ?? []
+                ),
             ];
         }
 
-        $isOwner = (int) $projectRow['owner_user_id'] === $userId;
         foreach ($chapters as &$chapter) {
             foreach ($chapter['lines'] as &$line) {
-                $assignment = $assignments[bin2hex($line['character'])] ?? [
-                    'assigned_user_id' => null,
-                    'assigned_name' => null,
-                ];
-                $line['assigned_name'] = $assignment['assigned_name'];
-                $line['can_record'] = $isOwner
-                    || $assignment['assigned_user_id'] === null
-                    || $assignment['assigned_user_id'] === $userId;
+                $lineAssignments = $assignments[bin2hex($line['character'])] ?? [];
+                $line['assigned_name'] = implode(', ', array_column($lineAssignments, 'assigned_name'));
+                $line['can_record'] = $isAdmin || in_array(
+                    $userId,
+                    array_column($lineAssignments, 'assigned_user_id'),
+                    true
+                );
             }
             unset($line);
         }
@@ -426,24 +468,24 @@ final class StudioModel
      *
      * @param int $projectId Requested project identifier.
      * @param int $userId Authenticated owner or project member.
+     * @param bool $isAdmin Whether the requester has global administrator access.
      * @return array{title:string,takes:iterable<array{line_number:int,storage_key:string,media_type:string,byte_size:int,attempt_no:int}>}|null Book metadata and lazy takes, or null when access is denied.
      */
-    public function exportTakes(int $projectId, int $userId): ?array
+    public function exportTakes(int $projectId, int $userId, bool $isAdmin = false): ?array
     {
         $statement = $this->database->prepare(
             'SELECT p.title AS project_title, l.id AS line_id,
                     r.id AS recording_id, r.storage_key, r.media_type,
                     r.byte_size, r.attempt_no
              FROM dabing_projects p
-             JOIN dabing_project_members m ON m.project_id = p.id
              LEFT JOIN dabing_project_chapters c ON c.project_id = p.id
              LEFT JOIN dabing_script_lines l ON l.chapter_id = c.id
              LEFT JOIN dabing_recordings r ON r.line_id = l.id
-             WHERE p.id = ? AND m.user_id = ?
+             WHERE p.id = ? AND ? = 1
              ORDER BY c.position, c.id, l.position, l.id,
                       r.attempt_no, r.id'
         );
-        $statement->execute([$projectId, $userId]);
+        $statement->execute([$projectId, $isAdmin ? 1 : 0]);
         $first = $statement->fetch(PDO::FETCH_ASSOC);
         if (!is_array($first)) {
             $statement->closeCursor();
@@ -481,97 +523,21 @@ final class StudioModel
     }
 
     /**
-     * Insert a one-time invitation hash with expiration. with expiration.
-     *
-     * @param int $projectId Project receiving a collaborator.
-     * @param string $tokenHash SHA-256 digest of the raw invitation token.
-     * @param string $expiresAt SQL timestamp expiration.
-     * @return void
-     */
-    public function createInvite(int $projectId, string $tokenHash, string $expiresAt): void
-    {
-        $statement = $this->database->prepare(
-            'INSERT INTO dabing_project_invites (project_id, token_hash, expires_at)
-             VALUES (?, ?, ?)'
-        );
-        $statement->execute([$projectId, $tokenHash, $expiresAt]);
-    }
-
-    /**
-     * Find a usable invitation by digest and lock it for claim.
-     *
-     * @param string $tokenHash SHA-256 digest of the presented token.
-     * @return array{id:int,project_id:int}|null Usable invite or null.
-     */
-    public function lockInvite(string $tokenHash): ?array
-    {
-        $statement = $this->database->prepare(
-            'SELECT id, project_id FROM dabing_project_invites
-             WHERE token_hash = ? AND claimed_at IS NULL AND expires_at > UTC_TIMESTAMP()
-             FOR UPDATE'
-        );
-        $statement->execute([$tokenHash]);
-        $row = $statement->fetch(PDO::FETCH_ASSOC);
-        return is_array($row) ? [
-            'id' => (int) $row['id'],
-            'project_id' => (int) $row['project_id'],
-        ] : null;
-    }
-
-    /**
-     * Atomically claim an invite and add the user as a project member.
-     *
-     * @param string $tokenHash SHA-256 digest of the presented token.
-     * @param int $userId Claiming authenticated user identifier.
-     * @return int Project identifier joined by the user.
-     * @throws FormError When invitation is invalid or already used.
-     */
-    public function claimInvite(string $tokenHash, int $userId): int
-    {
-        $this->database->beginTransaction();
-        try {
-            $invite = $this->lockInvite($tokenHash);
-            if ($invite === null) {
-                throw new FormError('Pozvánka je neplatná, expirovaná nebo již použitá.');
-            }
-            $member = $this->database->prepare(
-                'INSERT IGNORE INTO dabing_project_members (project_id, user_id)
-                 VALUES (?, ?)'
-            );
-            $member->execute([$invite['project_id'], $userId]);
-            $claim = $this->database->prepare(
-                'UPDATE dabing_project_invites
-                 SET claimed_by_user_id = ?, claimed_at = UTC_TIMESTAMP()
-                 WHERE id = ? AND claimed_at IS NULL'
-            );
-            $claim->execute([$userId, $invite['id']]);
-            if ($claim->rowCount() !== 1) {
-                throw new FormError('Pozvánka již byla použita.');
-            }
-            $this->database->commit();
-            return $invite['project_id'];
-        } catch (\Throwable $exception) {
-            if ($this->database->inTransaction()) {
-                $this->database->rollBack();
-            }
-            throw $exception;
-        }
-    }
-
-    /**
      * Select a take when the requesting user owns the project.
      *
      * @param int $projectId Project to authorize.
      * @param int $lineId Script line receiving selection.
      * @param int $recordingId Existing take to select.
      * @param int $userId Authenticated requester.
+     * @param bool $isAdmin Whether the requester has global administrator access.
      * @return bool True when selected, false if any relation is unauthorized.
      */
     public function selectTake(
         int $projectId,
         int $lineId,
         int $recordingId,
-        int $userId
+        int $userId,
+        bool $isAdmin = false
     ): bool {
         $statement = $this->database->prepare(
             'UPDATE dabing_script_lines l
@@ -581,13 +547,13 @@ final class StudioModel
                AND r.id = :recording
              SET l.selected_recording_id = r.id
              WHERE l.id = :line AND c.project_id = :project
-               AND p.owner_user_id = :owner'
+               AND :admin = 1'
         );
         $statement->execute([
             'recording' => $recordingId,
             'line' => $lineId,
             'project' => $projectId,
-            'owner' => $userId,
+            'admin' => $isAdmin ? 1 : 0,
         ]);
         if ($statement->rowCount() === 1) {
             return true;
@@ -597,138 +563,43 @@ final class StudioModel
              JOIN dabing_project_chapters c ON c.id = l.chapter_id
              JOIN dabing_projects p ON p.id = c.project_id
              JOIN dabing_recordings r ON r.line_id = l.id
-             WHERE p.id = ? AND p.owner_user_id = ? AND l.id = ?
+             WHERE p.id = ? AND ? = 1 AND l.id = ?
                AND r.id = ? AND l.selected_recording_id = r.id'
         );
-        $verify->execute([$projectId, $userId, $lineId, $recordingId]);
+        $verify->execute([$projectId, $isAdmin ? 1 : 0, $lineId, $recordingId]);
         return $verify->fetchColumn() !== false;
     }
 
     /**
-     * Read access metadata for an authorized project line.
-     *
-     * @param int $lineId Requested script line identifier.
-     * @param int $userId Authenticated user identifier.
-     * @return array{project_id:int}|null Authorized line scope or null.
-     */
-    public function lineAccess(int $lineId, int $userId): ?array
-    {
-        $statement = $this->database->prepare(
-            'SELECT c.project_id
-             FROM dabing_script_lines l
-             JOIN dabing_project_chapters c ON c.id = l.chapter_id
-             JOIN dabing_project_members m ON m.project_id = c.project_id
-             WHERE l.id = ? AND m.user_id = ?'
-        );
-        $statement->execute([$lineId, $userId]);
-        $row = $statement->fetch(PDO::FETCH_ASSOC);
-        return is_array($row) ? ['project_id' => (int) $row['project_id']] : null;
-    }
-
-    /**
-     * Check whether a project member may record a line under voice assignment.
+     * Check whether a collaborator has the exact role grant for one line.
      *
      * @param int $projectId Requested project.
      * @param int $lineId Requested script line.
      * @param int $userId Authenticated user.
-     * @return bool True for the owner, the assigned member, or an unassigned role.
+     * @return bool True only when a matching role grant exists.
      */
     public function canRecord(int $projectId, int $lineId, int $userId): bool
     {
         $statement = $this->database->prepare(
-            'SELECT p.owner_user_id, a.user_id AS assigned_user_id
+            'SELECT EXISTS (SELECT 1 FROM dabing_voice_assignments exact_role
+                            WHERE exact_role.project_id = p.id
+                              AND exact_role.user_id = ?
+                              AND CAST(exact_role.character_name AS BINARY)
+                                  = CAST(l.character_name AS BINARY)) AS role_access
              FROM dabing_script_lines l
              JOIN dabing_project_chapters c ON c.id = l.chapter_id
              JOIN dabing_projects p ON p.id = c.project_id
-             JOIN dabing_project_members m ON m.project_id = p.id
-             LEFT JOIN dabing_voice_assignments a
-               ON a.project_id = p.id
-              AND CAST(a.character_name AS BINARY)
-                  = CAST(l.character_name AS BINARY)
-             WHERE p.id = ? AND l.id = ? AND m.user_id = ?'
+             WHERE p.id = ? AND l.id = ? AND EXISTS (
+                   SELECT 1 FROM dabing_voice_assignments grant_role
+                   WHERE grant_role.project_id = p.id
+                     AND grant_role.user_id = ?)'
         );
-        $statement->execute([$projectId, $lineId, $userId]);
+        $statement->execute([$userId, $projectId, $lineId, $userId]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row)) {
             return false;
         }
-        return (int) $row['owner_user_id'] === $userId
-            || $row['assigned_user_id'] === null
-            || (int) $row['assigned_user_id'] === $userId;
-    }
-
-    /**
-     * Assign or clear one exact script character for a project owner.
-     *
-     * @param int $projectId Requested project.
-     * @param int $ownerId Authenticated project owner.
-     * @param string $character Exact character label from the script.
-     * @param int|null $userId Member receiving the assignment, or null to clear.
-     * @return void No value is returned.
-     * @throws FormError When owner, character, or member validation fails.
-     */
-    public function assignVoice(
-        int $projectId,
-        int $ownerId,
-        string $character,
-        ?int $userId
-    ): void {
-        $this->database->beginTransaction();
-        try {
-            $owner = $this->database->prepare(
-                'SELECT id FROM dabing_projects
-                 WHERE id = ? AND owner_user_id = ?'
-            );
-            $owner->execute([$projectId, $ownerId]);
-            if ($owner->fetchColumn() === false) {
-                throw new FormError('Obsazení může upravit pouze autor knihy.');
-            }
-
-            $roles = $this->database->prepare(
-                'SELECT l.id
-                 FROM dabing_script_lines l
-                 JOIN dabing_project_chapters c ON c.id = l.chapter_id
-                 WHERE c.project_id = ?
-                   AND CAST(l.character_name AS BINARY) = CAST(? AS BINARY)
-                 ORDER BY l.id FOR UPDATE'
-            );
-            $roles->execute([$projectId, $character]);
-            if ($roles->fetchAll(PDO::FETCH_COLUMN) === []) {
-                throw new FormError('Tato postava v knize nemá žádné repliky.');
-            }
-
-            if ($userId !== null) {
-                $member = $this->database->prepare(
-                    'SELECT 1 FROM dabing_project_members
-                     WHERE project_id = ? AND user_id = ?'
-                );
-                $member->execute([$projectId, $userId]);
-                if ($member->fetchColumn() === false) {
-                    throw new FormError('Obsazení musí vybrat člena této knihy.');
-                }
-                $assignment = $this->database->prepare(
-                    'INSERT INTO dabing_voice_assignments
-                        (project_id, character_name, user_id)
-                     VALUES (?, ?, ?)
-                     ON DUPLICATE KEY UPDATE user_id = VALUES(user_id),
-                         assigned_at = CURRENT_TIMESTAMP'
-                );
-                $assignment->execute([$projectId, $character, $userId]);
-            } else {
-                $clear = $this->database->prepare(
-                    'DELETE FROM dabing_voice_assignments
-                     WHERE project_id = ?
-                       AND CAST(character_name AS BINARY) = CAST(? AS BINARY)'
-                );
-                $clear->execute([$projectId, $character]);
-            }
-            $this->database->commit();
-        } catch (\Throwable $exception) {
-            if ($this->database->inTransaction()) {
-                $this->database->rollBack();
-            }
-            throw $exception;
-        }
+        return (int) $row['role_access'] === 1;
     }
 
     /**
@@ -741,6 +612,7 @@ final class StudioModel
      * @param string $mediaType Verified audio MIME type.
      * @param int $byteSize Verified upload size.
      * @param string|null $idempotencyPrefix Optional scoped storage-key lookup prefix.
+     * @param bool $isAdmin Whether the requester has global administrator access.
      * @return array{storage_key:string,recording_id:int,attempt_no:int,line_number:int,project_title:string,media_type:string,reused:bool} Persisted or previously saved take data.
      * @throws FormError When access is denied or the attempt cap is exhausted.
      */
@@ -751,13 +623,13 @@ final class StudioModel
         string $storageKey,
         string $mediaType,
         int $byteSize,
-        ?string $idempotencyPrefix = null
+        ?string $idempotencyPrefix = null,
+        bool $isAdmin = false
     ): array {
         $this->database->beginTransaction();
         try {
             $access = $this->database->prepare(
-                'SELECT p.title, p.owner_user_id,
-                        a.user_id AS assigned_user_id,
+                'SELECT p.title,
                         c.project_id, c.position AS chapter_position,
                         l.position AS line_position,
                         (SELECT COUNT(*)
@@ -771,22 +643,20 @@ final class StudioModel
                  FROM dabing_script_lines l
                  JOIN dabing_project_chapters c ON c.id = l.chapter_id
                  JOIN dabing_projects p ON p.id = c.project_id
-                 JOIN dabing_project_members m ON m.project_id = p.id
-                 LEFT JOIN dabing_voice_assignments a
-                   ON a.project_id = p.id
-                  AND CAST(a.character_name AS BINARY)
-                      = CAST(l.character_name AS BINARY)
-                 WHERE p.id = ? AND l.id = ? AND m.user_id = ?
+                 WHERE p.id = ? AND l.id = ?
+                   AND (? = 1 OR EXISTS (
+                       SELECT 1 FROM dabing_voice_assignments grant_role
+                       WHERE grant_role.project_id = p.id
+                         AND grant_role.user_id = ?))
                  FOR UPDATE'
             );
-            $access->execute([$projectId, $lineId, $userId]);
+            $access->execute([$projectId, $lineId, $isAdmin ? 1 : 0, $userId]);
             $line = $access->fetch(PDO::FETCH_ASSOC);
             if (!is_array($line)) {
                 throw new FormError('K této replice nemáte přístup.');
             }
-            if ((int) $line['owner_user_id'] !== $userId
-                && $line['assigned_user_id'] !== null
-                && (int) $line['assigned_user_id'] !== $userId) {
+            if (!$isAdmin
+                && !$this->lockExactRoleAssignment($projectId, $lineId, $userId)) {
                 throw new FormError('Tato postava je přiřazena jinému hlasu.');
             }
             if ($idempotencyPrefix !== null) {
@@ -866,12 +736,39 @@ final class StudioModel
     }
 
     /**
+     * Check a user's exact role grant for the line's current character.
+     *
+     * @param int $projectId Project scope.
+     * @param int $lineId Script line.
+     * @param int $userId Authenticated user.
+     * @return bool True when a case-sensitive role row still grants access.
+     */
+    private function lockExactRoleAssignment(
+        int $projectId,
+        int $lineId,
+        int $userId
+    ): bool {
+        $statement = $this->database->prepare(
+            'SELECT a.user_id FROM dabing_voice_assignments a
+             JOIN dabing_script_lines l
+               ON CAST(a.character_name AS BINARY)
+                  = CAST(l.character_name AS BINARY)
+             JOIN dabing_project_chapters c ON c.id = l.chapter_id
+             WHERE a.project_id = ? AND a.user_id = ? AND l.id = ?
+             FOR UPDATE'
+        );
+        $statement->execute([$projectId, $userId, $lineId]);
+        return $statement->fetchColumn() !== false;
+    }
+
+    /**
      * Lock a take and validate the requester before private-file staging.
      *
      * @param int $projectId Project containing the take.
      * @param int $lineId Script line containing the take.
      * @param int $recordingId Take selected for removal.
      * @param int $userId Authenticated owner or member.
+     * @param bool $isAdmin Whether the requester has global administrator access.
      * @return array{line_id:int,recording_id:int,storage_key:string,selected_recording_id:?int}|null Locked row metadata, or null when unauthorized.
      * @throws FormError When the caller is a member but lacks delete rights.
      */
@@ -879,29 +776,35 @@ final class StudioModel
         int $projectId,
         int $lineId,
         int $recordingId,
-        int $userId
+        int $userId,
+        bool $isAdmin = false
     ): ?array {
         $this->database->beginTransaction();
         try {
             $query = $this->database->prepare(
-                'SELECT p.owner_user_id, r.user_id, r.storage_key,
+                'SELECT r.user_id, r.storage_key,
                         l.selected_recording_id
                  FROM dabing_projects p
-                 JOIN dabing_project_members m ON m.project_id = p.id
                  JOIN dabing_project_chapters c ON c.project_id = p.id
                  JOIN dabing_script_lines l ON l.chapter_id = c.id
                  JOIN dabing_recordings r ON r.line_id = l.id
-                 WHERE p.id = ? AND l.id = ? AND r.id = ? AND m.user_id = ?
+                 WHERE p.id = ? AND l.id = ? AND r.id = ?
+                   AND (? = 1 OR EXISTS (
+                       SELECT 1 FROM dabing_voice_assignments grant_role
+                       WHERE grant_role.project_id = p.id
+                         AND grant_role.user_id = ?))
                  FOR UPDATE'
             );
-            $query->execute([$projectId, $lineId, $recordingId, $userId]);
+            $query->execute([
+                $projectId, $lineId, $recordingId,
+                $isAdmin ? 1 : 0, $userId,
+            ]);
             $row = $query->fetch(PDO::FETCH_ASSOC);
             if (!is_array($row)) {
                 $this->database->rollBack();
                 return null;
             }
-            if ((int) $row['owner_user_id'] !== $userId
-                && (int) $row['user_id'] !== $userId) {
+            if (!$isAdmin && (int) $row['user_id'] !== $userId) {
                 $this->database->rollBack();
                 throw new FormError('Tento pokus nemůžete odstranit.');
             }
@@ -1001,9 +904,10 @@ final class StudioModel
      *
      * @param int $recordingId Requested recording identifier.
      * @param int $userId Authenticated user identifier.
+     * @param bool $isAdmin Whether the requester has global administrator access.
      * @return array{id:int,project_id:int,project_title:string,line_number:int,attempt_no:int,storage_key:string,media_type:string,byte_size:int}|null Authorized take or null.
      */
-    public function recordingForUser(int $recordingId, int $userId): ?array
+    public function recordingForUser(int $recordingId, int $userId, bool $isAdmin = false): ?array
     {
         $statement = $this->database->prepare(
             'SELECT r.id, c.project_id, p.title AS project_title,
@@ -1020,10 +924,12 @@ final class StudioModel
              JOIN dabing_script_lines l ON l.id = r.line_id
              JOIN dabing_project_chapters c ON c.id = l.chapter_id
              JOIN dabing_projects p ON p.id = c.project_id
-             JOIN dabing_project_members m ON m.project_id = c.project_id
-             WHERE r.id = ? AND m.user_id = ?'
+             WHERE r.id = ? AND (? = 1 OR EXISTS (
+                 SELECT 1 FROM dabing_voice_assignments grant_role
+                 WHERE grant_role.project_id = p.id
+                   AND grant_role.user_id = ?))'
         );
-        $statement->execute([$recordingId, $userId]);
+        $statement->execute([$recordingId, $isAdmin ? 1 : 0, $userId]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? [
             'id' => (int) $row['id'],

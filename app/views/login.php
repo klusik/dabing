@@ -7,8 +7,8 @@ use Dabing\Http;
  * Repository: klusik/dabing
  * File: app/views/login.php
  * Module Type: View
- * Purpose: Let a registered collaborator enter a private studio.
- * Responsibilities: Present sign-in fields and registration path.
+ * Purpose: Let an invited account enter a private studio.
+ * Responsibilities: Present sign-in fields for existing accounts.
  * Author: Rudolf Klusal
  * License: All rights reserved
  */
@@ -25,6 +25,5 @@ use Dabing\Http;
             <label>Heslo <input name="password" type="password" autocomplete="current-password" required></label>
             <button class="icon-control auth-submit" type="submit" title="Přihlásit se" aria-label="Přihlásit se"><span aria-hidden="true">↪</span></button>
         </form>
-        <p class="auth-switch">Nemáte účet? <a href="<?= Http::escape(Http::url('register')) ?>">Vytvořit účet</a></p>
     </div>
 </section>

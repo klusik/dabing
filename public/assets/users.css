@@ -1,0 +1,76 @@
+/*
+ * Project: Dabing
+ * Repository: klusik/dabing
+ * File: public/assets/users.css
+ * Module Type: Stylesheet
+ * Purpose: Style the dense account administration table and anchored forms.
+ * Responsibilities: Keep rows compact, readable, and usable on narrow screens.
+ * Author: Rudolf Klusal
+ * License: All rights reserved
+ */
+.users-heading { margin: 0 0 12px; }
+.users-heading h1 { margin: 0; font-size: clamp(28px, 4vw, 42px); }
+.users-table-scroll { width: 100%; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.46); }
+.users-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.users-table th, .users-table td { padding: 8px 10px; border-bottom: 1px solid rgba(36,42,37,.09); text-align: left; vertical-align: top; }
+.users-table thead th { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.users-table th:nth-child(1) { width: 25%; }
+.users-table th:nth-child(2) { width: 13%; }
+.users-table th:nth-child(3) { width: 45%; }
+.users-table th:nth-child(4) { width: 17%; }
+.users-account { font-size: 12px; font-weight: 400; overflow-wrap: anywhere; }
+.users-account strong, .users-account > span { display: block; }
+.users-account strong { color: var(--ink); font-size: 12px; }
+.users-account > span { margin-top: 2px; color: var(--muted); font-size: 11px; }
+.users-admin-mark { display: inline-block; margin-left: 4px; color: var(--forest); font-size: 9px; font-weight: 700; }
+.users-status { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.users-status.is-active { border-color: rgba(49,93,75,.2); background: rgba(215,237,138,.22); color: var(--forest-deep); }
+.users-status.is-inactive { background: rgba(36,42,37,.04); color: var(--muted); }
+.users-books-cell { color: var(--muted); font-size: 11px; }
+.users-book-line { display: flex; flex-wrap: wrap; gap: 2px 7px; padding: 1px 0; }
+.users-book-line strong { color: var(--ink); font-weight: 650; }
+.users-no-books { color: var(--muted); font-style: italic; }
+.users-actions-cell { padding: 4px 8px !important; }
+.users-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.users-icon-form { margin: 0; }
+.users-action.icon-control { width: 36px; min-width: 36px; height: 36px; flex-basis: 36px; border-radius: 10px; font-size: 16px; }
+.users-action.is-disabled { opacity: .42; cursor: default; }
+.users-action.is-disabled:hover { border-color: rgba(36,42,37,.13); background: rgba(255,255,255,.72); }
+.users-password-trigger { color: var(--forest-deep); }
+.users-delete-trigger { color: #8c4036; }
+.users-delete-confirm { border-color: rgba(140,64,54,.22); background: rgba(140,64,54,.08); color: #8c4036; }
+.users-popover { width: min(420px, calc(100vw - 24px)); max-height: min(76vh, 680px); overflow: auto; padding: 13px; }
+.users-popover h2 { margin: 0 0 9px; font-size: 15px; }
+.users-popover p { margin: 0 0 9px; color: var(--muted); font-size: 11px; }
+.users-popover-scroll { display: grid; gap: 9px; max-height: min(64vh, 550px); overflow: auto; overscroll-behavior: contain; }
+.users-role-form { display: grid; gap: 6px; margin: 0; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.5); }
+.users-role-form fieldset { display: flex; flex-wrap: wrap; gap: 3px 8px; margin: 0; padding: 0; border: 0; }
+.users-role-form legend { width: 100%; margin-bottom: 4px; color: var(--ink); font-size: 11px; font-weight: 700; }
+.users-role-form label, .users-delete-form label { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; color: var(--muted); font-size: 11px; }
+.users-role-form input[type="checkbox"], .users-delete-form input[type="checkbox"] { width: 16px; min-height: 16px; height: 16px; accent-color: var(--forest); }
+.users-panel-submit { justify-self: start; min-height: 32px; padding: 0 10px; border: 1px solid rgba(49,93,75,.2); border-radius: 9px; background: rgba(49,93,75,.09); color: var(--forest-deep); font-size: 11px; font-weight: 700; cursor: pointer; }
+.users-panel-submit:hover { background: rgba(49,93,75,.15); }
+.users-password-form { display: grid; gap: 8px; margin: 0; }
+.users-password-form label { display: grid; gap: 4px; color: var(--muted); font-size: 11px; }
+.users-password-form input { min-width: 0; min-height: 38px; padding: 0 9px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.7); color: var(--ink); }
+.users-delete-form { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; }
+.users-empty-note { padding: 8px 0; }
+@media (max-width: 720px) {
+    .users-heading { margin-bottom: 8px; }
+    .users-table-scroll { border-radius: 11px; }
+    .users-table { display: block; }
+    .users-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+    .users-table tbody { display: block; }
+    .users-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 9px 10px; border-bottom: 1px solid rgba(36,42,37,.1); }
+    .users-table tr:last-child { border-bottom: 0; }
+    .users-table th, .users-table td { width: auto !important; min-width: 0; padding: 0; border: 0; }
+    .users-account { grid-column: 1; grid-row: 1; }
+    .users-status-cell { grid-column: 2; grid-row: 1; justify-self: end; }
+    .users-books-cell { grid-column: 1 / -1; grid-row: 2; }
+    .users-actions-cell { grid-column: 1 / -1; grid-row: 3; }
+    .users-actions { justify-content: flex-start; gap: 7px; }
+    .users-action.icon-control { width: 42px; min-width: 42px; height: 42px; flex-basis: 42px; }
+    .users-popover { width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 24px); }
+    .users-popover-scroll { max-height: calc(100vh - 170px); }
+    .users-role-form label, .users-delete-form label { min-height: 36px; }
+}

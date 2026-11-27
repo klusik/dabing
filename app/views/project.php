@@ -22,38 +22,46 @@ $playlist = is_array($data['playlist'] ?? null) ? $data['playlist'] : [];
 $exportUrl = (string) ($data['export_url']
     ?? Http::url('export-book', ['id' => (int) ($project['id'] ?? 0)]));
 $hasRecordings = (bool) ($data['has_recordings'] ?? false);
+$filter = (string) ($data['filter'] ?? 'all');
 ?>
 <section class="workspace-heading">
-    <div class="workspace-title"><a class="back-link" href="<?= Http::escape(Http::url('projects')) ?>" title="Moje knihy" aria-label="Zpět na moje knihy">←<span class="sr-only">Zpět na moje knihy</span></a><p class="eyebrow"><span class="eyebrow-dot"></span> <?= (($project['role'] ?? '') === 'owner' ? 'Autor' : 'Spolupracovník') ?> · soukromé studio</p><h1><?= Http::escape((string) ($project['title'] ?? 'Audiokniha')) ?></h1></div>
+    <div class="workspace-title"><a class="back-link" href="<?= Http::escape(Http::url('projects')) ?>" title="Moje knihy" aria-label="Zpět na moje knihy">←<span class="sr-only">Zpět na moje knihy</span></a><p class="eyebrow"><span class="eyebrow-dot"></span> <?= !empty($data['is_admin']) ? 'Správce' : 'Spolupracovník' ?> · soukromé studio</p><h1><?= Http::escape((string) ($project['title'] ?? 'Audiokniha')) ?></h1></div>
     <div class="workspace-actions">
         <?php if ($canInvite): ?>
             <div class="anchored-control">
-                <button class="icon-control" type="button" data-panel-trigger="invite-panel" title="Pozvat spolupracovníka" aria-label="Pozvat spolupracovníka" aria-expanded="false" aria-controls="invite-panel"><span aria-hidden="true">＋</span></button>
-                <div class="popover" id="invite-panel" data-panel hidden>
-                    <h2>E-mailová pozvánka</h2>
-                    <form method="post" action="<?= Http::escape(Http::url('email-invite', ['id' => (string) $project['id']])) ?>" class="invite-form">
-                        <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
-                        <label class="invite-copy-label">E-mail spolupracovníka<input name="email" type="email" autocomplete="email" required></label>
-                        <button class="icon-control" type="submit" title="Odeslat pozvánku" aria-label="Odeslat pozvánku"><span aria-hidden="true">→</span></button>
-                    </form>
+                <button class="icon-control" type="button" data-panel-trigger="invite-panel" title="Spravovat pozvánky" aria-label="Spravovat pozvánky" aria-expanded="false" aria-controls="invite-panel"><span aria-hidden="true">✉</span></button>
+                <div class="popover invite-popover" id="invite-panel" data-panel hidden>
+                    <h2>Pozvat spolupracovníka</h2>
+                    <?php require __DIR__ . '/project-invitations.php'; ?>
                 </div>
             </div>
             <div class="anchored-control">
-                <button class="icon-control" type="button" data-panel-trigger="cast-panel" title="Přiřadit hlasy" aria-label="Přiřadit hlasy" aria-expanded="false" aria-controls="cast-panel"><span aria-hidden="true">♬</span></button>
-                <div class="popover cast-popover" id="cast-panel" data-panel hidden>
+                <button class="icon-control" type="button" data-panel-trigger="cast-panel" title="Přiřadit hlasy" aria-label="Přiřadit hlasy" aria-expanded="<?= Http::query('cast') === '1' ? 'true' : 'false' ?>" aria-controls="cast-panel"><span aria-hidden="true">♬</span></button>
+                <div class="popover cast-popover" id="cast-panel" data-panel<?= Http::query('cast') === '1' ? '' : ' hidden' ?>>
                     <h2>Obsazení</h2>
                     <?php foreach ($voices as $voice): ?>
-                        <form method="post" action="<?= Http::escape(Http::url('assign-voice', ['id' => (string) $project['id']])) ?>" class="cast-row">
-                            <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
-                            <input type="hidden" name="character" value="<?= Http::escape((string) $voice['character']) ?>"><input type="hidden" name="page" value="<?= Http::escape((string) ($pagination['page'] ?? 1)) ?>">
-                            <label><?= Http::escape((string) $voice['character']) ?><select name="user_id" aria-label="Hlas pro <?= Http::escape((string) $voice['character']) ?>">
-                                <option value="0"<?= empty($voice['assigned_user_id']) ? ' selected' : '' ?>>Nepřiřazeno</option>
-                                <?php foreach ($members as $member): ?>
-                                    <option value="<?= Http::escape((string) $member['id']) ?>"<?= (int) ($voice['assigned_user_id'] ?? 0) === (int) $member['id'] ? ' selected' : '' ?>><?= Http::escape((string) $member['name']) ?></option>
+                        <section class="cast-role">
+                            <h3><?= Http::escape((string) $voice['character']) ?></h3>
+                            <div class="cast-choices">
+                                <?php foreach (($data['role_users'] ?? []) as $roleUser): ?>
+                                    <?php $isAssigned = in_array((int) $roleUser['id'], $voice['assigned_users'] ?? [], true); ?>
+                                    <?php if ($isAssigned || !empty($roleUser['is_active'])): ?>
+                                    <form method="post" action="<?= Http::escape(Http::url('assign-voice', ['id' => (string) $project['id']])) ?>">
+                                        <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
+                                        <input type="hidden" name="character" value="<?= Http::escape((string) $voice['character']) ?>">
+                                        <input type="hidden" name="user_id" value="<?= Http::escape((string) $roleUser['id']) ?>">
+                                        <input type="hidden" name="assigned" value="<?= $isAssigned ? '0' : '1' ?>">
+                                        <input type="hidden" name="page" value="<?= Http::escape((string) ($pagination['page'] ?? 1)) ?>">
+                                        <input type="hidden" name="filter" value="<?= Http::escape($filter) ?>">
+                                        <button class="cast-choice<?= $isAssigned ? ' is-assigned' : '' ?>" type="submit" aria-pressed="<?= $isAssigned ? 'true' : 'false' ?>" title="<?= $isAssigned ? 'Odebrat postavu ' : 'Přiřadit postavu ' ?><?= Http::escape((string) $roleUser['name']) ?>">
+                                            <span class="cast-choice-state" aria-hidden="true"><?= $isAssigned ? '✓' : '+' ?></span>
+                                            <?= Http::escape((string) $roleUser['name']) ?><?= empty($roleUser['is_active']) ? ' · neaktivní' : '' ?>
+                                        </button>
+                                    </form>
+                                    <?php endif; ?>
                                 <?php endforeach; ?>
-                            </select></label>
-                            <button class="icon-control" type="submit" title="Uložit obsazení" aria-label="Uložit hlas pro <?= Http::escape((string) $voice['character']) ?>"><span aria-hidden="true">✓</span></button>
-                        </form>
+                            </div>
+                        </section>
                     <?php endforeach; ?>
                 </div>
             </div>
@@ -88,7 +96,7 @@ $hasRecordings = (bool) ($data['has_recordings'] ?? false);
         >
             <span aria-hidden="true">↓</span>
         </a>
-        <?php if ($hasRecordings): ?>
+        <?php if ($hasRecordings && (!empty($data['is_admin']) || ($project['role'] ?? '') === 'owner')): ?>
             <a
                 class="icon-control zip-export-control"
                 href="<?= Http::escape($exportUrl) ?>"
@@ -100,22 +108,27 @@ $hasRecordings = (bool) ($data['has_recordings'] ?? false);
         <?php endif; ?>
     </div>
 </section>
+<nav class="script-filter" aria-label="Filtr replik">
+    <a class="<?= $filter === 'all' ? 'is-current' : '' ?>" href="<?= Http::escape(Http::url('project', ['id' => $project['id'], 'filter' => 'all'])) ?>"<?= $filter === 'all' ? ' aria-current="page"' : '' ?>>Všechny repliky</a>
+    <a class="<?= $filter === 'mine' ? 'is-current' : '' ?>" href="<?= Http::escape(Http::url('project', ['id' => $project['id'], 'filter' => 'mine'])) ?>"<?= $filter === 'mine' ? ' aria-current="page"' : '' ?>>Moje repliky</a>
+</nav>
 <?php if ((int) ($pagination['pages'] ?? 1) > 1): ?>
     <nav class="script-pagination" aria-label="Stránkování scénáře">
         <?php if ((int) ($pagination['page'] ?? 1) > 1): ?>
-            <a class="icon-control" href="<?= Http::escape(Http::url('project', ['id' => (string) $project['id'], 'page' => (int) $pagination['page'] - 1])) ?>" title="Předchozí stránka" aria-label="Předchozí stránka">←</a>
+            <a class="icon-control" href="<?= Http::escape(Http::url('project', ['id' => (string) $project['id'], 'page' => (int) $pagination['page'] - 1, 'filter' => $filter])) ?>" title="Předchozí stránka" aria-label="Předchozí stránka">←</a>
         <?php else: ?>
             <span class="icon-control is-disabled" aria-hidden="true">←</span>
         <?php endif; ?>
         <span>Strana <?= Http::escape((string) $pagination['page']) ?> / <?= Http::escape((string) $pagination['pages']) ?> · <?= Http::escape(number_format((int) $pagination['total'], 0, ',', ' ')) ?> replik</span>
         <?php if ((int) ($pagination['page'] ?? 1) < (int) ($pagination['pages'] ?? 1)): ?>
-            <a class="icon-control" href="<?= Http::escape(Http::url('project', ['id' => (string) $project['id'], 'page' => (int) $pagination['page'] + 1])) ?>" title="Další stránka" aria-label="Další stránka">→</a>
+            <a class="icon-control" href="<?= Http::escape(Http::url('project', ['id' => (string) $project['id'], 'page' => (int) $pagination['page'] + 1, 'filter' => $filter])) ?>" title="Další stránka" aria-label="Další stránka">→</a>
         <?php else: ?>
             <span class="icon-control is-disabled" aria-hidden="true">→</span>
         <?php endif; ?>
     </nav>
 <?php endif; ?>
 <?php if ($chapters === []): ?><section class="empty-projects compact-empty"><div class="empty-art" aria-hidden="true"><span class="empty-disc"></span><span class="empty-wave"></span></div><div><h2>Projekt zatím neobsahuje kapitoly.</h2><p>Importujte scénář při vytvoření projektu.</p></div></section><?php endif; ?>
+<?php if ($chapters === [] && $filter === 'mine'): ?><p class="muted">Zatím nemáte uloženou žádnou repliku.</p><?php endif; ?>
 <div class="studio-layout">
     <div class="script-column">
         <?php foreach ($chapters as $chapter): ?>
@@ -142,8 +155,10 @@ $hasRecordings = (bool) ($data['has_recordings'] ?? false);
                                     <div class="take-row<?= !empty($take['is_selected']) ? ' take-selected' : '' ?><?= !empty($take['can_delete']) ? ' take-row-has-delete' : '' ?>">
                                         <div class="take-meta">
                                             <span class="attempt-badge" title="Číslo pokusu"><?= sprintf('%03d', $attemptNo) ?></span>
-                                            <?php if ($fileName !== ''): ?><code class="take-filename"><?= Http::escape($fileName) ?></code><?php endif; ?>
-                                            <span class="take-byline"><?= Http::escape((string) $take['user_name']) ?><?= !empty($take['is_selected']) ? ' · vybráno' : '' ?></span>
+                                            <span class="take-name" title="<?= Http::escape(trim($fileName . ' · ' . (string) $take['user_name'])) ?>">
+                                                <?php if ($fileName !== ''): ?><code class="take-filename"><?= Http::escape($fileName) ?></code><?php endif; ?>
+                                                <span class="take-byline"><?= Http::escape((string) $take['user_name']) ?><?= !empty($take['is_selected']) ? ' · vybráno' : '' ?></span>
+                                            </span>
                                         </div>
                                         <audio preload="none" controls src="<?= Http::escape($audioUrl) ?>" aria-label="Přehrát pokus <?= sprintf('%03d', $attemptNo) ?> od <?= Http::escape((string) $take['user_name']) ?>"></audio>
                                         <a class="icon-control take-download" href="<?= Http::escape($downloadUrl) ?>"<?= $fileName !== '' ? ' download="' . Http::escape($fileName) . '"' : '' ?> title="Stáhnout <?= Http::escape($fileName !== '' ? $fileName : 'nahrávku') ?>" aria-label="Stáhnout <?= Http::escape($fileName !== '' ? $fileName : 'nahrávku') ?>"><span aria-hidden="true">↓</span></a>
@@ -158,17 +173,18 @@ $hasRecordings = (bool) ($data['has_recordings'] ?? false);
                                                         <input type="hidden" name="line_id" value="<?= Http::escape((string) $line['id']) ?>">
                                                         <input type="hidden" name="recording_id" value="<?= Http::escape((string) $take['id']) ?>">
                                                         <input type="hidden" name="page" value="<?= Http::escape((string) ($pagination['page'] ?? 1)) ?>">
+                                                        <input type="hidden" name="filter" value="<?= Http::escape($filter) ?>">
                                                         <button class="icon-control delete-confirm" type="submit" title="Potvrdit smazání" aria-label="Potvrdit smazání"><span class="trash-icon" aria-hidden="true"></span><span>Smazat</span></button>
                                                         <button class="icon-control" type="button" data-panel-close title="Zrušit mazání" aria-label="Zrušit mazání"><span aria-hidden="true">×</span></button>
                                                     </form>
                                                 </div>
                                             </div>
                                         <?php endif; ?>
-                                        <?php if (empty($take['is_selected']) && ($project['role'] ?? '') === 'owner'): ?>
+                                        <?php if (empty($take['is_selected']) && (!empty($data['is_admin']) || ($project['role'] ?? '') === 'owner')): ?>
                                             <form method="post" action="<?= Http::escape(Http::url('select-take', ['id' => (string) $project['id']])) ?>" class="inline-form">
                                                 <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
                                                 <input type="hidden" name="line_id" value="<?= Http::escape((string) $line['id']) ?>">
-                                                <input type="hidden" name="recording_id" value="<?= Http::escape((string) $take['id']) ?>"><input type="hidden" name="page" value="<?= Http::escape((string) ($pagination['page'] ?? 1)) ?>">
+                                                <input type="hidden" name="recording_id" value="<?= Http::escape((string) $take['id']) ?>"><input type="hidden" name="page" value="<?= Http::escape((string) ($pagination['page'] ?? 1)) ?>"><input type="hidden" name="filter" value="<?= Http::escape($filter) ?>">
                                                 <button class="icon-control take-select" type="submit" title="Vybrat pokus <?= sprintf('%03d', $attemptNo) ?>" aria-label="Vybrat pokus <?= sprintf('%03d', $attemptNo) ?>"><span aria-hidden="true">✓</span></button>
                                             </form>
                                         <?php endif; ?>

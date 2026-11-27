@@ -37,15 +37,18 @@ Import scénáře má strop 20 MB (20 000 000 bajtů). Při nahrávání souboru
 aplikace zohlední také `upload_max_filesize` a `post_max_size` s rezervou
 pro formulář. U výběru souboru se zobrazí výsledný limit pro daný web.
 
-### Aktualizace z první verze studia
+### Aktualizace z verze 0.1.1
 
-Před aktualizací zálohujte databázi a úložiště. Pozastavte nahrávání a z kořene
-repozitáře spusťte `php scripts/migrate_recording_attempts.php DDL_USER`.
-Heslo databázového účtu s právy ke změně schématu zadejte přes stdin.
-Migrace doplní pořadí dřívějších pokusů a zachová jejich formáty i výběr pro
-poslech. Potom aplikujte opakovatelná schémata database/studio.sql a
-database/email-invites.sql účtem s právy ke změně schématu. První příkaz
-můžete bezpečně spustit opakovaně.
+Před aktualizací zálohujte databázi a úložiště a přihlaste se do verze 0.1.1
+dosavadním správcovským účtem. Otevřete **Aktualizace** a nainstalujte vydání
+0.2.0. Updater aplikuje čekající migraci před výměnou aplikačních souborů.
+Pokud běžný databázový účet nemůže měnit schéma, zadejte účet s oprávněním DDL
+do pole **Databázová oprávnění**.
+
+Migrace nastaví stávající účty jako aktivní a jejich verzi relace na 0.
+Starší relace s platným otiskem hesla se proto zachovají. Každá následná
+deaktivace účtu nebo správcovský reset hesla zvýší verzi relace a zneplatní
+všechny starší relace, i pokud je účet znovu aktivován před jejich použitím.
 
 ## Scénář
 
@@ -85,12 +88,36 @@ může mít 200 znaků, postava 100 znaků a replika 10 000 znaků.
 
 ## Záznamy a poslech
 
-Vlastník pozve čtenáře e-mailem. Jednorázový kód z pozvánky patří jedné knize
-a konkrétní adrese. Při potvrzení si nový uživatel nastaví jméno a heslo.
-Uživatel s existujícím účtem se přihlásí a potvrdí pozvánku. Po přijetí může
-vlastník v nabídce Obsazení přiřadit čtenáře k postavám. Nepřiřazenou repliku
-může nahrát člen knihy. Přiřazenou repliku nahrává vybraný čtenář nebo autor.
-Změna obsazení zachová všechny uložené pokusy.
+Správce vytváří počáteční administrátorský účet pouze při instalaci. Další
+účty vznikají přijetím e-mailové pozvánky. Administrátor v nabídce **Uživatelé**
+vidí účty podle e-mailu, aktivní stav a obsazení po knihách. Může změnit
+přiřazené postavy, deaktivovat nebo znovu aktivovat účet, resetovat heslo a
+odstranit účet. Deaktivace i správcovský reset hesla zvyšují verzi relace;
+všechny dřívější relace tak zůstanou neplatné i po opětovné aktivaci účtu.
+Administrátor nemůže deaktivovat ani odstranit svůj vlastní účet.
+
+Správce odešle e-mailovou pozvánku z knihy a může předem vybrat několik
+postav. Jednorázový odkaz platí 24 hodin a e-mail uvádí čas konce platnosti
+v českém čase. Odkaz používá veřejný protokol, doménu, port a cestu, na níž
+správce pozvánku odeslal. Otevření odkazu zobrazí náhled. Nový příjemce
+vyplní jméno a heslo, e-mail je předvyplněný. Dabing ho po potvrzení přihlásí.
+Příjemce se stávajícím účtem pozvánku potvrdí po přihlášení stejným e-mailem.
+
+Na nevyřízené pozvánce lze použít **Zrušit** nebo **Poslat znovu**. Opětovné
+odeslání nahradí původní odkaz a spustí novou 24hodinovou lhůtu. Chybu odeslání
+zobrazí panel pozvánek, odkud lze doručení zopakovat.
+
+Každou postavu může nahrávat více lidí a jeden člověk může mít několik postav.
+Předem vybrané role se přidělí při přijetí pozvánky. Správce může obsazení
+měnit také kliknutím na jména v panelu **Obsazení** nebo ve správě uživatelů.
+Kniha se spolupracovníkovi zobrazí po přiřazení první role. Má přístup k celému
+scénáři i všem pokusům. Nahrávat může vlastní role a filtr **Moje repliky** mu
+ukáže jejich text. Po odebrání poslední role ztratí přístup od dalšího požadavku.
+Správce může otevřít každou knihu a nahrávat všechny repliky.
+
+Odstranění účtu smaže jeho přiřazení postav. Záznamy a knihy zůstanou zachované;
+jejich odkazy na uživatele se nastaví na prázdnou hodnotu. Dabing nemaže ani
+nepřesouvá soubory nahrávek a nemění vybraný záběr.
 
 Každá replika má vlastní číslování pokusů sdílené
 všemi mluvčími. Replika má nejvýše 999 pokusů. U názvu knihy *O pejskovi* mají například první dva pokusy
@@ -98,8 +125,8 @@ pro první repliku názvy `o_pejskovi_0001_001.mp3` a
 `o_pejskovi_0001_002.mp3`. Jednotlivé názvy jsou uvedené u nahrávek a
 použijí se také při stažení do počítače.
 
-Autor knihy může odstranit libovolný pokus. Spolupracovník může odstranit jen
-svůj vlastní pokus, i když už má postavu přiřazenou někdo jiný. Při odstranění
+Správce může odstranit libovolný pokus. Spolupracovník s přístupem ke knize
+může odstranit svůj vlastní pokus. Při odstranění
 vybraného pokusu se vybere nejnižší zbývající číslo. Číslování již uložených
 pokusů zůstává. Nový pokus dostane číslo za nejvyšším dosavadním.
 
@@ -111,7 +138,7 @@ nezdaří, soubor zůstane v tomto adresáři a omezená údržba ho zkusí znov
 některém dalším úspěšném mazání. Údržba smaže jen soubor, na který už databáze
 neodkazuje.
 
-První záběr se použije automaticky a vlastník může vybrat jiný. Poslech
+První záběr se použije automaticky a správce může vybrat jiný. Poslech
 přehraje vybrané repliky ve scénářovém pořadí a přeskočí prázdná místa.
 Při nahrávání bliká REC a ukazatel reaguje na úroveň mikrofonu. Po stisknutí
 Stop se záznam v prohlížeči rovnou převede na MP3 a uloží. Stejně se zpracuje
@@ -131,7 +158,7 @@ budou vyžadovat nové přihlášení.
 Ovládací prvek ZIP v horní liště knihy stáhne všechny její uložené pokusy
 v pořadí replik a pokusů. Soubory jsou přímo v kořeni archivu a zachovají si
 názvy jednotlivých stažení, například `o_pejskovi_0001_001.mp3`.
-Členové knihy dostanou například archiv `o_pejskovi_nahravky.zip`.
+Správce stáhne například archiv `o_pejskovi_nahravky.zip`.
 
 Export vyžaduje rozšíření PHP `zip`. Server připraví archiv v neveřejném
 úložišti a po odeslání jej odstraní. Při přípravě potřebuje volné místo
@@ -140,16 +167,15 @@ pro velikost archivu.
 ## Pošta pro pozvánky
 
 Zkopírujte `config/mail.example.php` do neveřejného `storage/mail.php`.
-Nastavte `from` na adresu odesílatele na vaší doméně. Pro odkaz pozvánky
-má přednost veřejná adresa instalace. Poštovní `base_url` slouží jako výchozí
-hodnota pro stávající instalace. Na WEDOSu využívá aplikace PHP mail() s adresou
-odesílatele pro návratovou cestu. [Nastavení pošty WEDOS](https://kb.vedos.cz/maily-blokovani/)
+Nastavte `from` na adresu odesílatele na vaší doméně. Dabing sestaví odkaz
+z ověřené veřejné adresy aktuálního požadavku. Interní cesta přepsaná Apachem
+nemění podadresář v odkazu. Na WEDOSu používá PHP `mail()` s odesílatelem pro
+návratovou cestu. [Nastavení pošty WEDOS](https://kb.vedos.cz/maily-blokovani/)
 
-V Laragonu lze použít Mailpit a veřejnou adresu `http://localhost/dabing/`.
-Volitelné klíče `smtp_host` a `smtp_port` nastavují přímé SMTP v PHP na
-Windows. Je-li nastavený `sendmail_path`, transport vybírá tento příkaz.
-Výchozí místní Mailpit přijímá zkušební poštu na portu 1025 a ukazuje ji
-v rozhraní na portu 8025.
+V Laragonu lze použít Mailpit. Volitelné klíče `smtp_host` a `smtp_port`
+nastavují přímé SMTP v PHP na Windows. Je-li nastavený `sendmail_path`, Dabing
+použije nakonfigurovaný příkaz a kontroluje jeho návratový kód. Výchozí místní
+Mailpit přijímá poštu na portu 1025 a zobrazuje ji na portu 8025.
 
 ## Aktualizace
 
@@ -176,11 +202,17 @@ v tomto požadavku a připojí se ke stejnému serveru a databázi.
 Z ověřené revize sestavte balík mimo pracovní kopii.
 
 ```sh
-php scripts/build-update.php 0.1.1 ../dabing-0.1.1.zip
+php scripts/build-update.php 0.2.0 ../dabing-0.2.0.zip
 ```
 
-Balík `dabing-0.1.1.zip` patří jako asset ke stabilnímu vydání s přesným tagem
-`0.1.1` v `klusik/dabing`. Updater přijímá také značku `v` před verzí.
+Balík `dabing-0.2.0.zip` patří jako asset ke stabilnímu vydání s přesným tagem
+`0.2.0` v `klusik/dabing`. Updater přijímá také značku `v` před verzí.
+Příkazy po schválení vydání:
+
+```sh
+git tag 0.2.0
+git push origin refs/tags/0.2.0
+```
 Verze balíku musí odpovídat tagu a GitHub musí k assetu uvádět kontrolní součet
 SHA-256. Archiv má jediný kořen
 `dabing/`.

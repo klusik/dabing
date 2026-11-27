@@ -12,108 +12,87 @@ use Throwable;
  * Repository: klusik/dabing
  * File: app/models/EmailInviteModel.php
  * Module Type: Model
- * Purpose: Persist one-time email invitations and bounded send/claim activity.
- * Responsibilities: Own SQL transactions and atomically grant project membership.
+ * Purpose: Persist email invitations and atomic role claims.
+ * Responsibilities: Own invite SQL, delivery state, quotas, and assignments.
  * Author: Rudolf Klusal
  * License: All rights reserved
  */
 
-/** Owns invitation SQL and transactional membership updates. */
+/** Owns transactional email invitation persistence. */
 final class EmailInviteModel
 {
-    /** Per-owner sending limit.
+    /**
      * Type: int; Units: messages; Scope: one owner per rolling hour;
-     * Consumers: issue(); Rationale: bound invitation mail abuse.
+     * Consumers: reserveSend(); Rationale: bound invitation mail abuse.
      */
     private const MAX_OWNER_SENDS = 10;
-    /** Owner sending window.
-     * Type: int; Units: seconds; Scope: one owner;
-     * Consumers: issue(); Rationale: reset send quota hourly.
+    /**
+     * Type: int; Units: seconds; Scope: owner send quota;
+     * Consumers: reserveSend(); Rationale: reset quota hourly.
      */
     private const SEND_WINDOW_SECONDS = 3600;
-    /** Maximum claim submissions for one code.
+    /**
      * Type: int; Units: attempts; Scope: one invitation;
-     * Consumers: claim transactions; Rationale: bound retries and guessing.
+     * Consumers: lockInvite(); Rationale: bound claim retries.
      */
     private const MAX_CLAIM_ATTEMPTS = 5;
 
-    private readonly AccountModel $accounts;
-
-    /** Create the model on the runtime database connection.
-     * @param PDO $database Active PDO connection.
+    /** Create model on the active PDO connection.
+     * @param PDO $database Configured application database.
      * @return void No return value.
      */
     public function __construct(private readonly PDO $database)
     {
-        $this->accounts = new AccountModel($database);
     }
 
-    /** Create a pending invitation and count the owner's send.
-     * @param int $projectId Target project identifier.
-     * @param int $ownerId Authenticated project owner.
-     * @param string $email Normalized recipient email.
-     * @param string $codeHash SHA-256 hash of the emailed code.
-     * @param string $expiresAt UTC SQL datetime.
-     * @return int New invitation identifier.
-     * @throws FormError When the owner's sending limit is reached.
+    /** Check that an active project owner or active administrator manages the book.
+     * @param int $projectId Project identifier.
+     * @param int $userId Authenticated account identifier.
+     * @return bool True when the user can manage invitations for this project.
      */
-    public function issue(
-        int $projectId,
-        int $ownerId,
-        string $email,
-        string $codeHash,
-        string $expiresAt
-    ): int {
+    public function canManageProject(int $projectId, int $userId): bool
+    {
+        $query = $this->database->prepare(
+            'SELECT 1 FROM dabing_projects p JOIN dabing_users u ON u.id = :user '
+            . 'WHERE p.id = :project AND u.is_active = 1 '
+            . 'AND (p.owner_user_id = u.id OR u.is_admin = 1) LIMIT 1'
+        );
+        $query->execute(['user' => $userId, 'project' => $projectId]);
+        return $query->fetchColumn() !== false;
+    }
+
+    /** Create pending invitation and reserve one send against owner quota.
+     * @param int $projectId Target book identifier.
+     * @param int $ownerId Authenticated book owner.
+     * @param string $email Normalized recipient email.
+     * @param list<string> $roles Exact character names.
+     * @param string $codeHash SHA-256 hash of raw token.
+     * @param string $expiresAt UTC expiry timestamp.
+     * @return int New invitation ID.
+     * @throws FormError When owner quota is exhausted.
+     */
+    public function issue(int $projectId, int $ownerId, string $email, array $roles, string $codeHash, string $expiresAt): int
+    {
         $this->database->beginTransaction();
         try {
-            $insertLimit = $this->database->prepare(
-                'INSERT IGNORE INTO dabing_email_invite_limits '
-                . '(owner_user_id, sent_count, window_started_at) '
-                . 'VALUES (:owner, 0, UTC_TIMESTAMP())'
-            );
-            $insertLimit->execute(['owner' => $ownerId]);
-            $readLimit = $this->database->prepare(
-                'SELECT sent_count, window_started_at '
-                . 'FROM dabing_email_invite_limits '
-                . 'WHERE owner_user_id = :owner FOR UPDATE'
-            );
-            $readLimit->execute(['owner' => $ownerId]);
-            $limit = $readLimit->fetch(PDO::FETCH_ASSOC);
-            if (!is_array($limit)) {
-                throw new HttpError(500, 'Pozvánku nelze vytvořit.');
-            }
-            $expired = strtotime((string) $limit['window_started_at'] . ' UTC')
-                < time() - self::SEND_WINDOW_SECONDS;
-            $count = $expired ? 1 : (int) $limit['sent_count'] + 1;
-            if (!$expired && $count > self::MAX_OWNER_SENDS) {
-                throw new FormError('Další e-mailovou pozvánku můžete poslat později.');
-            }
-            $updateLimit = $this->database->prepare(
-                'UPDATE dabing_email_invite_limits SET sent_count = :count, '
-                . 'window_started_at = :started WHERE owner_user_id = :owner'
-            );
-            $updateLimit->execute([
-                'count' => $count,
-                'started' => $expired ? gmdate('Y-m-d H:i:s')
-                    : (string) $limit['window_started_at'],
-                'owner' => $ownerId,
-            ]);
-            $invalidate = $this->database->prepare(
+            $this->reserveSend($ownerId);
+            $expire = $this->database->prepare(
                 'UPDATE dabing_email_invites SET invalidated_at = UTC_TIMESTAMP() '
                 . 'WHERE project_id = :project AND invited_email = :email '
                 . 'AND claimed_at IS NULL AND invalidated_at IS NULL'
             );
-            $invalidate->execute(['project' => $projectId, 'email' => $email]);
+            $expire->execute(['project' => $projectId, 'email' => $email]);
             $insert = $this->database->prepare(
                 'INSERT INTO dabing_email_invites '
                 . '(project_id, invited_email, code_hash, created_by_user_id, expires_at) '
                 . 'VALUES (:project, :email, :hash, :owner, :expires)'
             );
             $insert->execute([
-                'project' => $projectId, 'email' => $email, 'hash' => $codeHash,
-                'owner' => $ownerId, 'expires' => $expiresAt,
+                'project' => $projectId, 'email' => $email,
+                'hash' => $codeHash, 'owner' => $ownerId, 'expires' => $expiresAt,
             ]);
             $id = (int) $this->database->lastInsertId();
+            $this->replaceRoles($id, $roles);
             $this->database->commit();
             return $id;
         } catch (Throwable $error) {
@@ -124,172 +103,342 @@ final class EmailInviteModel
         }
     }
 
-    /** Mark an invite usable only after mail transport accepts it.
-     * @param int $id Invitation identifier.
-     * @return bool True when the row moved into delivered state.
+    /** Reserve an email send inside the current transaction.
+     * @param int $ownerId Owner account identifier.
+     * @return void No return value.
+     * @throws FormError When hourly send limit is exceeded.
      */
-    public function markDelivered(int $id): bool
+    private function reserveSend(int $ownerId): void
+    {
+        $this->database->prepare(
+            'INSERT IGNORE INTO dabing_email_invite_limits '
+            . '(owner_user_id, sent_count, window_started_at) '
+            . 'VALUES (:owner, 0, UTC_TIMESTAMP())'
+        )->execute(['owner' => $ownerId]);
+        $query = $this->database->prepare(
+            'SELECT sent_count, window_started_at FROM dabing_email_invite_limits '
+            . 'WHERE owner_user_id = :owner FOR UPDATE'
+        );
+        $query->execute(['owner' => $ownerId]);
+        $row = $query->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            throw new HttpError(500, 'Pozvánku nelze vytvořit.');
+        }
+        $expired = strtotime((string) $row['window_started_at'] . ' UTC')
+            < time() - self::SEND_WINDOW_SECONDS;
+        $count = $expired ? 1 : (int) $row['sent_count'] + 1;
+        if (!$expired && $count > self::MAX_OWNER_SENDS) {
+            throw new FormError('Další e-mailovou pozvánku můžete poslat později.');
+        }
+        $this->database->prepare(
+            'UPDATE dabing_email_invite_limits SET sent_count = :count, '
+            . 'window_started_at = :started WHERE owner_user_id = :owner'
+        )->execute([
+            'count' => $count,
+            'started' => $expired ? gmdate('Y-m-d H:i:s') : $row['window_started_at'],
+            'owner' => $ownerId,
+        ]);
+    }
+
+    /** Replace saved roles for one invitation.
+     * @param int $id Invitation identifier.
+     * @param list<string> $roles Exact validated character names.
+     * @return void No return value.
+     */
+    private function replaceRoles(int $id, array $roles): void
+    {
+        $delete = $this->database->prepare(
+            'DELETE FROM dabing_email_invite_roles WHERE invite_id = :id'
+        );
+        $delete->execute(['id' => $id]);
+        $insert = $this->database->prepare(
+            'INSERT INTO dabing_email_invite_roles (invite_id, character_name) '
+            . 'VALUES (:id, :character)'
+        );
+        foreach ($roles as $role) {
+            $insert->execute(['id' => $id, 'character' => $role]);
+        }
+    }
+
+    /** Record successful transport only if the token has not been rotated or cancelled.
+     * @param int $id Invitation identifier.
+     * @param string $hash Expected current code hash.
+     * @param string $sentAt UTC send-start timestamp.
+     * @param string $expiry UTC expiry exactly one configured lifetime after send start.
+     * @return bool True when delivery state was recorded.
+     */
+    public function markDelivered(int $id, string $hash, string $sentAt, string $expiry): bool
     {
         $statement = $this->database->prepare(
-            'UPDATE dabing_email_invites SET delivered_at = UTC_TIMESTAMP() '
-            . 'WHERE id = :id AND delivered_at IS NULL '
-            . 'AND claimed_at IS NULL AND invalidated_at IS NULL'
+            'UPDATE dabing_email_invites SET delivered_at = :sent, expires_at = :expiry, '
+            . 'delivery_error = NULL WHERE id = :id AND code_hash = :hash '
+            . 'AND delivered_at IS NULL AND claimed_at IS NULL '
+            . 'AND invalidated_at IS NULL'
         );
-        $statement->execute(['id' => $id]);
+        $statement->execute([
+            'sent' => $sentAt, 'expiry' => $expiry, 'id' => $id, 'hash' => $hash,
+        ]);
         return $statement->rowCount() === 1;
     }
 
-    /** Invalidate an invitation after transport failure.
+    /** Record a safe transport failure only for the same still-current token.
      * @param int $id Invitation identifier.
+     * @param string $hash Expected current code hash.
+     * @param string $summary Non-secret operator-recognizable summary.
      * @return void No return value.
      */
-    public function invalidate(int $id): void
+    public function markFailed(int $id, string $hash, string $summary): void
+    {
+        $statement = $this->database->prepare(
+            'UPDATE dabing_email_invites SET invalidated_at = UTC_TIMESTAMP(), '
+            . 'delivery_error = :error WHERE id = :id AND code_hash = :hash '
+            . 'AND delivered_at IS NULL AND claimed_at IS NULL '
+            . 'AND invalidated_at IS NULL'
+        );
+        $statement->execute(['error' => mb_substr($summary, 0, 255), 'id' => $id, 'hash' => $hash]);
+    }
+
+    /** List owner invitations with their exact saved roles and derived state.
+     * @param int $projectId Target project identifier.
+     * @return list<array{id:int,email:string,expires_at:string,created_at:string,delivered_at:?string,claimed_at:?string,invalidated_at:?string,delivery_error:?string,roles:list<string>}> Invitation rows.
+     */
+    public function listForProject(int $projectId): array
+    {
+        $query = $this->database->prepare(
+            'SELECT id, invited_email, expires_at, created_at, delivered_at, '
+            . 'claimed_at, invalidated_at, delivery_error FROM dabing_email_invites '
+            . 'WHERE project_id = :project ORDER BY created_at DESC, id DESC'
+        );
+        $query->execute(['project' => $projectId]);
+        $rows = $query->fetchAll(PDO::FETCH_ASSOC);
+        $roles = $this->database->prepare(
+            'SELECT character_name FROM dabing_email_invite_roles '
+            . 'WHERE invite_id = :id ORDER BY character_name'
+        );
+        $result = [];
+        foreach ($rows as $row) {
+            $roles->execute(['id' => $row['id']]);
+            $result[] = [
+                'id' => (int) $row['id'], 'email' => (string) $row['invited_email'],
+                'expires_at' => (string) $row['expires_at'],
+                'created_at' => (string) $row['created_at'],
+                'delivered_at' => $row['delivered_at'] === null ? null : (string) $row['delivered_at'],
+                'claimed_at' => $row['claimed_at'] === null ? null : (string) $row['claimed_at'],
+                'invalidated_at' => $row['invalidated_at'] === null ? null : (string) $row['invalidated_at'],
+                'delivery_error' => $row['delivery_error'] === null ? null : (string) $row['delivery_error'],
+                'roles' => array_map(static fn (array $role): string => (string) $role['character_name'], $roles->fetchAll(PDO::FETCH_ASSOC)),
+            ];
+        }
+        return $result;
+    }
+
+    /** Cancel one pending invitation by row and project identifiers.
+     * @param int $id Invitation identifier.
+     * @param int $projectId Parent book identifier.
+     * @return bool True when a pending invite was invalidated.
+     */
+    public function cancel(int $id, int $projectId): bool
     {
         $statement = $this->database->prepare(
             'UPDATE dabing_email_invites SET invalidated_at = UTC_TIMESTAMP() '
-            . 'WHERE id = :id AND claimed_at IS NULL AND invalidated_at IS NULL'
+            . 'WHERE id = :id AND project_id = :project AND claimed_at IS NULL '
+            . 'AND invalidated_at IS NULL'
         );
-        $statement->execute(['id' => $id]);
+        $statement->execute(['id' => $id, 'project' => $projectId]);
+        return $statement->rowCount() === 1;
     }
 
-    /** Look up a delivered invitation and whether its email has an account.
-     * @param string $codeHash SHA-256 hash of the presented code.
-     * @return array{id:int,project_id:int,email:string,project_title:string,recipient_user_id:?int}|null Valid invite data or null.
+    /** Replace a failed, expired, or pending invite with a new token atomically.
+     * @param int $id Invitation identifier.
+     * @param int $projectId Parent book identifier.
+     * @param int $ownerId Authenticated owner reserving the resend.
+     * @param string $hash New token hash.
+     * @param string $expiry New UTC expiry.
+     * @return array{id:int,email:string,roles:list<string>} Updated invitation data or null on conflict.
      */
-    public function findPending(string $codeHash): ?array
+    public function rotate(int $id, int $projectId, int $ownerId, string $hash, string $expiry): ?array
     {
-        $statement = $this->database->prepare(
+        $this->database->beginTransaction();
+        try {
+            $this->reserveSend($ownerId);
+            $query = $this->database->prepare(
+                'SELECT invited_email, delivery_error, invalidated_at FROM dabing_email_invites '
+                . 'WHERE id = :id AND project_id = :project '
+                . 'AND claimed_at IS NULL FOR UPDATE'
+            );
+            $query->execute(['id' => $id, 'project' => $projectId]);
+            $row = $query->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($row)) {
+                $this->database->rollBack();
+                return null;
+            }
+            if ($row['invalidated_at'] !== null
+                && $row['delivery_error'] === null) {
+                $this->database->rollBack();
+                return null;
+            }
+            $this->database->prepare(
+                'UPDATE dabing_email_invites SET code_hash = :hash, expires_at = :expires, '
+                . 'delivered_at = NULL, invalidated_at = NULL, delivery_error = NULL, attempts = 0 '
+                . 'WHERE id = :id AND project_id = :project AND claimed_at IS NULL'
+            )->execute(['hash' => $hash, 'expires' => $expiry, 'id' => $id, 'project' => $projectId]);
+            $roles = $this->database->prepare(
+                'SELECT character_name FROM dabing_email_invite_roles WHERE invite_id = :id'
+            );
+            $roles->execute(['id' => $id]);
+            $roleList = array_map(static fn (array $role): string => (string) $role['character_name'], $roles->fetchAll(PDO::FETCH_ASSOC));
+            $this->database->commit();
+            return ['id' => $id, 'email' => (string) $row['invited_email'], 'roles' => $roleList];
+        } catch (Throwable $error) {
+            if ($this->database->inTransaction()) {
+                $this->database->rollBack();
+            }
+            throw $error;
+        }
+    }
+
+    /** Find a delivered, unexpired invitation by SHA-256 digest.
+     * @param string $hash Token digest.
+     * @return array{id:int,project_id:int,email:string,project_title:string,recipient_user_id:?int,roles:list<string>} Invite preview or null.
+     */
+    public function findPending(string $hash): ?array
+    {
+        $query = $this->database->prepare(
             'SELECT i.id, i.project_id, i.invited_email, p.title, u.id AS user_id '
-            . 'FROM dabing_email_invites i '
-            . 'JOIN dabing_projects p ON p.id = i.project_id '
-            . 'LEFT JOIN dabing_users u ON u.email = i.invited_email '
+            . 'FROM dabing_email_invites i JOIN dabing_projects p ON p.id = i.project_id '
+            . 'LEFT JOIN dabing_users u ON LOWER(u.email) = LOWER(i.invited_email) '
             . 'WHERE i.code_hash = :hash AND i.delivered_at IS NOT NULL '
             . 'AND i.expires_at > UTC_TIMESTAMP() AND i.claimed_at IS NULL '
-            . 'AND i.invalidated_at IS NULL AND i.attempts < :max_attempts '
-            . 'LIMIT 1'
+            . 'AND i.invalidated_at IS NULL LIMIT 1'
         );
-        $statement->execute([
-            'hash' => $codeHash, 'max_attempts' => self::MAX_CLAIM_ATTEMPTS,
-        ]);
-        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        $query->execute(['hash' => $hash]);
+        $row = $query->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row)) {
             return null;
         }
+        $roles = $this->database->prepare(
+            'SELECT character_name FROM dabing_email_invite_roles WHERE invite_id = :id'
+        );
+        $roles->execute(['id' => $row['id']]);
         return [
-            'id' => (int) $row['id'],
-            'project_id' => (int) $row['project_id'],
-            'email' => (string) $row['invited_email'],
-            'project_title' => (string) $row['title'],
-            'recipient_user_id' => $row['user_id'] === null
-                ? null : (int) $row['user_id'],
+            'id' => (int) $row['id'], 'project_id' => (int) $row['project_id'],
+            'email' => (string) $row['invited_email'], 'project_title' => (string) $row['title'],
+            'recipient_user_id' => $row['user_id'] === null ? null : (int) $row['user_id'],
+            'roles' => array_map(static fn (array $role): string => (string) $role['character_name'], $roles->fetchAll(PDO::FETCH_ASSOC)),
         ];
     }
 
-    /** Atomically grant an invitation to a matching existing account.
-     * @param string $codeHash SHA-256 hash of the presented code.
-     * @param int $userId Signed-in recipient account identifier.
-     * @return array{project_id:int,email_matches:bool}|null Claim result or invalid code.
+    /** Atomically claim invite for an existing active account matching the exact email.
+     * @param string $hash Expected token digest.
+     * @param int $userId Authenticated account identifier.
+     * @return int|null Project ID or null when claim failed.
      */
-    public function claimExisting(string $codeHash, int $userId): ?array
+    public function claimExisting(string $hash, int $userId): ?int
+    {
+        return $this->claim($hash, $userId);
+    }
+
+    /** Atomically create an account and claim invite.
+     * @param string $hash Expected token digest.
+     * @param string $name Account display name.
+     * @param string $passwordHash Password hash.
+     * @return array{id:int,project_id:int}|null Account and project IDs or null.
+     */
+    public function claimNew(string $hash, string $name, string $passwordHash): ?array
     {
         $this->database->beginTransaction();
         try {
-            $invite = $this->lockInvite($codeHash);
+            $invite = $this->lockInvite($hash);
             if ($invite === null) {
                 $this->database->commit();
                 return null;
             }
             $this->incrementAttempt($invite['id']);
-            $user = $this->accounts->findById($userId);
-            $matches = $user !== null
-                && hash_equals(mb_strtolower($invite['email']), mb_strtolower($user['email']));
-            if (!$matches) {
-                $this->database->commit();
-                return ['project_id' => $invite['project_id'], 'email_matches' => false];
-            }
-            $this->addMembership($invite['project_id'], $userId);
-            $this->consume($invite['id'], $userId);
-            $this->database->commit();
-            return ['project_id' => $invite['project_id'], 'email_matches' => true];
-        } catch (Throwable $error) {
-            if ($this->database->inTransaction()) {
-                $this->database->rollBack();
-            }
-            throw $error;
-        }
-    }
-
-    /** Atomically create a recipient account and claim the invitation.
-     * @param string $codeHash SHA-256 hash of the presented code.
-     * @param string $name New account display name.
-     * @param string $passwordHash New account password hash.
-     * @return array{project_id:int,email:string}|null New claim or account conflict.
-     */
-    public function claimNew(
-        string $codeHash,
-        string $name,
-        string $passwordHash
-    ): ?array {
-        $this->database->beginTransaction();
-        try {
-            $invite = $this->lockInvite($codeHash);
-            if ($invite === null) {
+            $existing = $this->database->prepare('SELECT id FROM dabing_users WHERE LOWER(email) = LOWER(:email) LIMIT 1 FOR UPDATE');
+            $existing->execute(['email' => $invite['email']]);
+            if ($existing->fetchColumn() !== false) {
                 $this->database->commit();
                 return null;
             }
-            $this->incrementAttempt($invite['id']);
-            if ($this->accounts->findByEmail($invite['email']) !== null) {
-                $this->database->commit();
-                return null;
-            }
-            $userId = $this->accounts->create(
-                $name, $invite['email'], $passwordHash, false
+            $create = $this->database->prepare(
+                'INSERT INTO dabing_users (name, email, password_hash, is_admin) VALUES (:name, :email, :hash, 0)'
             );
-            $this->addMembership($invite['project_id'], $userId);
+            $create->execute(['name' => $name, 'email' => $invite['email'], 'hash' => $passwordHash]);
+            $userId = (int) $this->database->lastInsertId();
+            $this->grantRoles($invite['id'], $invite['project_id'], $userId);
             $this->consume($invite['id'], $userId);
             $this->database->commit();
-            return [
-                'project_id' => $invite['project_id'],
-                'email' => $invite['email'],
-            ];
+            return ['id' => $userId, 'project_id' => $invite['project_id']];
         } catch (Throwable $error) {
             if ($this->database->inTransaction()) {
                 $this->database->rollBack();
             }
-            if ($error instanceof \PDOException
-                && (string) $error->getCode() === '23000') {
+            if ($error instanceof \PDOException && (string) $error->getCode() === '23000') {
                 return null;
             }
             throw $error;
         }
     }
 
-    /** Lock a valid delivered invite in the current transaction.
-     * @param string $codeHash SHA-256 invitation code hash.
-     * @return array{id:int,project_id:int,email:string}|null Claimable invite or null.
+    /** Claim token for an existing account.
+     * @param string $hash Expected digest.
+     * @param int $userId Existing active account identifier.
+     * @return int|null Project ID or null.
      */
-    private function lockInvite(string $codeHash): ?array
+    private function claim(string $hash, int $userId): ?int
     {
-        $statement = $this->database->prepare(
-            'SELECT id, project_id, invited_email, attempts '
-            . 'FROM dabing_email_invites WHERE code_hash = :hash '
-            . 'AND delivered_at IS NOT NULL AND expires_at > UTC_TIMESTAMP() '
-            . 'AND claimed_at IS NULL AND invalidated_at IS NULL FOR UPDATE'
+        $this->database->beginTransaction();
+        try {
+            $invite = $this->lockInvite($hash);
+            if ($invite === null) {
+                $this->database->commit();
+                return null;
+            }
+            $this->incrementAttempt($invite['id']);
+            $account = $this->database->prepare(
+                'SELECT email, is_active FROM dabing_users WHERE id = :id FOR UPDATE'
+            );
+            $account->execute(['id' => $userId]);
+            $row = $account->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($row) || !(bool) $row['is_active']
+                || !hash_equals(mb_strtolower($invite['email']), mb_strtolower((string) $row['email']))) {
+                $this->database->commit();
+                return null;
+            }
+            $this->grantRoles($invite['id'], $invite['project_id'], $userId);
+            $this->consume($invite['id'], $userId);
+            $this->database->commit();
+            return $invite['project_id'];
+        } catch (Throwable $error) {
+            if ($this->database->inTransaction()) {
+                $this->database->rollBack();
+            }
+            throw $error;
+        }
+    }
+
+    /** Lock the current valid token and read its invitation ID.
+     * @param string $hash Expected token digest.
+     * @return array{id:int,project_id:int,email:string}|null Valid locked invite.
+     */
+    private function lockInvite(string $hash): ?array
+    {
+        $query = $this->database->prepare(
+            'SELECT id, project_id, invited_email, attempts FROM dabing_email_invites '
+            . 'WHERE code_hash = :hash AND delivered_at IS NOT NULL '
+            . 'AND expires_at > UTC_TIMESTAMP() AND claimed_at IS NULL '
+            . 'AND invalidated_at IS NULL FOR UPDATE'
         );
-        $statement->execute(['hash' => $codeHash]);
-        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        $query->execute(['hash' => $hash]);
+        $row = $query->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row) || (int) $row['attempts'] >= self::MAX_CLAIM_ATTEMPTS) {
             return null;
         }
-        return [
-            'id' => (int) $row['id'],
-            'project_id' => (int) $row['project_id'],
-            'email' => (string) $row['invited_email'],
-        ];
+        return ['id' => (int) $row['id'], 'project_id' => (int) $row['project_id'], 'email' => (string) $row['invited_email']];
     }
 
-    /** Increment the attempts for the currently locked invite.
-     * @param int $id Locked invitation identifier.
+    /** Count one claim submission for the currently locked invitation.
+     * @param int $id Invitation identifier.
      * @return void No return value.
      */
     private function incrementAttempt(int $id): void
@@ -300,34 +449,52 @@ final class EmailInviteModel
         $statement->execute(['id' => $id]);
     }
 
-    /** Add project membership inside the open invite transaction.
+    /** Apply saved exact roles as access assignments; empty roles grant no access.
+     * @param int $inviteId Invitation identifier.
      * @param int $projectId Project identifier.
      * @param int $userId Recipient account identifier.
      * @return void No return value.
      */
-    private function addMembership(int $projectId, int $userId): void
+    private function grantRoles(int $inviteId, int $projectId, int $userId): void
     {
-        $statement = $this->database->prepare(
-            'INSERT IGNORE INTO dabing_project_members (project_id, user_id) '
-            . 'VALUES (:project, :user)'
+        $query = $this->database->prepare(
+            'SELECT r.character_name FROM dabing_email_invite_roles r '
+            . 'WHERE r.invite_id = :invite AND EXISTS ('
+            . 'SELECT 1 FROM dabing_project_chapters c JOIN dabing_script_lines l ON l.chapter_id = c.id '
+            . 'WHERE c.project_id = :project AND CAST(l.character_name AS BINARY) = CAST(r.character_name AS BINARY))'
         );
-        $statement->execute(['project' => $projectId, 'user' => $userId]);
+        $query->execute(['invite' => $inviteId, 'project' => $projectId]);
+        $roles = $query->fetchAll(PDO::FETCH_COLUMN);
+        $countQuery = $this->database->prepare(
+            'SELECT COUNT(*) FROM dabing_email_invite_roles WHERE invite_id = :id'
+        );
+        $countQuery->execute(['id' => $inviteId]);
+        $expectedCount = (int) $countQuery->fetchColumn();
+        if (count($roles) !== $expectedCount) {
+            throw new FormError('Role pozvánky již nejsou v knize dostupné.');
+        }
+        foreach ($roles as $role) {
+            $insert = $this->database->prepare(
+                'INSERT IGNORE INTO dabing_voice_assignments (project_id, character_name, user_id) '
+                . 'VALUES (:project, :character, :user)'
+            );
+            $insert->execute(['project' => $projectId, 'character' => $role, 'user' => $userId]);
+        }
     }
 
-    /** Consume an invitation inside the open transaction.
+    /** Consume invitation after all role writes succeed.
      * @param int $id Invitation identifier.
      * @param int $userId Recipient account identifier.
      * @return void No return value.
      */
     private function consume(int $id, int $userId): void
     {
-        $statement = $this->database->prepare(
-            'UPDATE dabing_email_invites SET claimed_by_user_id = :user, '
-            . 'claimed_at = UTC_TIMESTAMP() WHERE id = :id '
-            . 'AND claimed_at IS NULL AND invalidated_at IS NULL'
+        $update = $this->database->prepare(
+            'UPDATE dabing_email_invites SET claimed_by_user_id = :user, claimed_at = UTC_TIMESTAMP() '
+            . 'WHERE id = :id AND claimed_at IS NULL AND invalidated_at IS NULL'
         );
-        $statement->execute(['user' => $userId, 'id' => $id]);
-        if ($statement->rowCount() !== 1) {
+        $update->execute(['user' => $userId, 'id' => $id]);
+        if ($update->rowCount() !== 1) {
             throw new FormError('Pozvánka je neplatná nebo expirovaná.');
         }
     }

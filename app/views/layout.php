@@ -21,6 +21,9 @@ use Dabing\Http;
     <meta name="theme-color" content="#f4f1e8">
     <title><?= Http::escape($title ?? 'Dabing') ?> · Dabing</title>
     <link rel="stylesheet" href="<?= Http::escape(Http::asset('site.css')) ?>">
+    <?php if (($view ?? '') === 'users'): ?>
+        <link rel="stylesheet" href="<?= Http::escape(Http::asset('users.css')) ?>">
+    <?php endif; ?>
     <script src="<?= Http::escape(Http::asset('site.js')) ?>" defer></script>
 </head>
 <body>
@@ -35,6 +38,7 @@ use Dabing\Http;
                 <a class="icon-control" href="<?= Http::escape(Http::url('projects')) ?>" aria-label="Moje knihy" title="Moje knihy"><span aria-hidden="true">▦</span></a>
                 <a class="icon-control" href="<?= Http::escape(Http::url('account')) ?>" aria-label="Účet <?= Http::escape((string) $user['name']) ?>" title="Účet"><span aria-hidden="true">♙</span></a>
                 <?php if (!empty($user['is_admin'])): ?>
+                    <a class="icon-control" href="<?= Http::escape(Http::url('users')) ?>" aria-label="Uživatelé" title="Uživatelé"><span aria-hidden="true">♧</span></a>
                     <a class="icon-control" href="<?= Http::escape(Http::url('update')) ?>" aria-label="Aktualizace" title="Aktualizace"><span aria-hidden="true">⟳</span></a>
                 <?php endif; ?>
                 <form method="post" action="<?= Http::escape(Http::url('logout')) ?>" class="nav-form">
@@ -43,7 +47,6 @@ use Dabing\Http;
                 </form>
             <?php else: ?>
                 <?php if (($view ?? '') !== 'login'): ?><a class="icon-control" href="<?= Http::escape(Http::url('login')) ?>" aria-label="Přihlásit se" title="Přihlásit se"><span aria-hidden="true">↪</span></a><?php endif; ?>
-                <?php if (($view ?? '') !== 'register'): ?><a class="icon-control" href="<?= Http::escape(Http::url('register')) ?>" aria-label="Vytvořit účet" title="Vytvořit účet"><span aria-hidden="true">＋</span></a><?php endif; ?>
             <?php endif; ?>
         </nav>
     </header>

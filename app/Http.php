@@ -314,14 +314,11 @@ final class Http
     /** Build an application route URL using the public base when configured.
      * @param string $route Allowlisted route name.
      * @param array<string,int|string> $params Scalar query parameters.
-     * @return string Canonical absolute URL or safe query-only fallback.
+     * @return string Query-only route URL on the current browser origin.
      */
     public static function url(string $route, array $params = []): string
     {
         $query = self::routeQuery($route, $params);
-        if (self::$configuredPublicBase !== null) {
-            return self::$configuredPublicBase . '/' . $query;
-        }
         return $query;
     }
 
@@ -333,14 +330,9 @@ final class Http
     {
         if (preg_match('/\A[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\z/', $filename) !== 1
             || str_contains($filename, '..')) {
-            return self::$configuredPublicBase === null
-                ? './public/assets/'
-                : self::$configuredPublicBase . '/public/assets/';
+            return './public/assets/';
         }
-        $assetPath = '/public/assets/' . rawurlencode($filename);
-        return self::$configuredPublicBase === null
-            ? '.' . $assetPath
-            : self::$configuredPublicBase . $assetPath;
+        return './public/assets/' . rawurlencode($filename);
     }
 
     /** Store one typed flash notice for the next rendered page.
@@ -375,8 +367,8 @@ final class Http
         $templates = [
             'install' => 'install.php', 'login' => 'login.php',
             'account' => 'account.php',
-            'register' => 'register.php', 'projects' => 'projects.php',
-            'project' => 'project.php', 'join' => 'join.php', 'email-join' => 'email-invite-join.php',
+            'projects' => 'projects.php', 'users' => 'users.php',
+            'project' => 'project.php', 'email-join' => 'email-invite-join.php',
             'update' => 'update.php', 'error' => 'error.php',
         ];
         if (!isset($templates[$view])) {
@@ -419,11 +411,6 @@ final class Http
         if (is_string($emailCode)
             && preg_match('/\\A[a-f0-9]{32}\\z/D', $emailCode) === 1) {
             self::redirect('email-join', ['code' => $emailCode]);
-        }
-        $token = $_SESSION['pending_invite'] ?? null;
-        unset($_SESSION['pending_invite']);
-        if (is_string($token) && preg_match('/\A[a-f0-9]{64}\z/D', $token) === 1) {
-            self::redirect('join', ['token' => $token]);
         }
         self::redirect('projects');
     }

@@ -13,6 +13,7 @@ use Dabing\Http;
  * License: All rights reserved
  */
 $projects = is_array($data['projects'] ?? null) ? $data['projects'] : [];
+$isAdmin = (bool) ($data['is_admin'] ?? false);
 /**
  * Type: Integer; Units: bytes; Scope: script file import; Consumers: help copy,
  * file input limit, and client preflight; Rationale: reflect app and host limits.
@@ -68,7 +69,7 @@ $maxScriptPasteLabel = $maxScriptPasteBytes >= $bytesPerMegabyte
     <section class="project-grid" aria-label="Moje projekty">
         <?php foreach ($projects as $project): ?>
             <a class="project-card" href="<?= Http::escape(Http::url('project', ['id' => (string) $project['id']])) ?>">
-                <div class="project-card-top"><span class="project-icon" aria-hidden="true"><span></span><span></span><span></span></span><span class="role-pill"><?= (($project['role'] ?? '') === 'owner' ? 'Autor' : 'Spolupracovník') ?></span></div>
+                <div class="project-card-top"><span class="project-icon" aria-hidden="true"><span></span><span></span><span></span></span><span class="role-pill"><?= $isAdmin ? 'Správce' : 'Spolupracovník' ?></span></div>
                 <h2><?= Http::escape((string) $project['title']) ?></h2>
                 <p class="project-meta"><span><?= Http::escape((string) $project['line_count']) ?> replik</span><span class="meta-dot"></span><span><?= Http::escape((string) $project['recording_count']) ?> nahrávek</span></p>
                 <div class="project-card-foot"><span>Otevřít studio</span><span class="arrow-circle" aria-hidden="true">↗</span></div>
@@ -78,7 +79,7 @@ $maxScriptPasteLabel = $maxScriptPasteBytes >= $bytesPerMegabyte
 <?php else: ?>
     <section class="empty-projects">
         <div class="empty-art" aria-hidden="true"><span class="empty-disc"></span><span class="empty-wave"></span><span class="empty-spark">✳</span></div>
-        <div><h2>Zatím tu nejsou žádné knihy.</h2><p>Vytvořte projekt z JSON scénáře nebo otevřete pozvánku.</p></div>
+        <div><h2>Zatím tu nejsou žádné knihy.</h2><p>Importujte scénář JSON a začněte nahrávat repliky.</p></div>
         <a class="text-link" href="#novy-projekt">Nahrát scénář <span aria-hidden="true">↓</span></a>
     </section>
 <?php endif; ?>

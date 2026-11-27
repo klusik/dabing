@@ -142,7 +142,31 @@ const RECORDING_MIME_TYPES = [
 function bindPanel(trigger, panel) {
     const close = () => {
         panel.hidden = true;
+        panel.classList.remove('is-viewport-positioned');
+        panel.style.left = '';
+        panel.style.top = '';
+        panel.style.maxHeight = '';
         trigger.setAttribute('aria-expanded', 'false');
+    };
+    const positionViewportPanel = () => {
+        if (panel.hidden || !panel.matches(
+            '.cast-popover, .invite-popover, .users-popover'
+        )) return;
+        const edge = 12;
+        panel.style.maxHeight = `${Math.max(120, window.innerHeight - edge * 2)}px`;
+        const anchor = trigger.getBoundingClientRect();
+        const bounds = panel.getBoundingClientRect();
+        const left = Math.max(
+            edge,
+            Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - edge)
+        );
+        const below = anchor.bottom + 8;
+        const top = below + bounds.height <= window.innerHeight - edge
+            ? below
+            : Math.max(edge, anchor.top - bounds.height - 8);
+        panel.style.left = `${left}px`;
+        panel.style.top = `${top}px`;
+        panel.classList.add('is-viewport-positioned');
     };
     panel.querySelectorAll('[data-panel-close]').forEach((button) => {
         button.addEventListener('click', () => {
@@ -155,6 +179,10 @@ function bindPanel(trigger, panel) {
         const willOpen = panel.hidden;
         document.querySelectorAll('[data-panel]').forEach((openPanel) => {
             openPanel.hidden = true;
+            openPanel.classList.remove('is-viewport-positioned');
+            openPanel.style.left = '';
+            openPanel.style.top = '';
+            openPanel.style.maxHeight = '';
             const openTrigger = document.querySelector(
                 `[aria-controls="${openPanel.id}"]`
             );
@@ -162,6 +190,7 @@ function bindPanel(trigger, panel) {
         });
         panel.hidden = !willOpen;
         trigger.setAttribute('aria-expanded', String(willOpen));
+        if (willOpen) positionViewportPanel();
     });
     panel.addEventListener('click', (event) => event.stopPropagation());
     document.addEventListener('click', (event) => {
@@ -173,6 +202,9 @@ function bindPanel(trigger, panel) {
             trigger.focus();
         }
     });
+    window.addEventListener('resize', positionViewportPanel);
+    window.addEventListener('scroll', positionViewportPanel, true);
+    if (!panel.hidden) positionViewportPanel();
 }
 
 /**

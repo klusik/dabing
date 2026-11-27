@@ -33,6 +33,7 @@ final class StudioController
 
     private readonly StudioModel $model;
     private readonly StudioService $service;
+    private readonly PDO $database;
 
     /**
      * Build the controller with configured persistence and private storage.
@@ -47,6 +48,7 @@ final class StudioController
         string $storageDirectory,
         private readonly array $user
     ) {
+        $this->database = $database;
         $this->model = new StudioModel($database);
         $this->service = new StudioService(
             $this->model,
@@ -82,10 +84,12 @@ final class StudioController
             }
             Http::redirect('project', ['id' => $projectId]);
         }
-        $projects = $this->model->projectsForUser($this->userId());
+        $isAdmin = !empty($this->user['is_admin']);
+        $projects = $this->model->projectsForUser($this->userId(), $isAdmin);
         $limits = $this->scriptLimits();
         Http::render('projects', 'Moje knihy', [
             'projects' => $projects,
+            'is_admin' => $isAdmin,
             'max_script_bytes' => $limits['file'],
             'max_script_paste_bytes' => $limits['paste'],
         ], $this->user);
@@ -108,7 +112,9 @@ final class StudioController
         $view = $this->model->projectView(
             $projectId,
             $this->userId(),
-            Http::queryId('page') ?? 1
+            Http::queryId('page') ?? 1,
+            !empty($this->user['is_admin']),
+            Http::query('filter') === 'mine'
         );
         if ($view === null) {
             throw new HttpError(404, 'Kniha nebyla nalezena.');
@@ -152,13 +158,34 @@ final class StudioController
         }
         unset($track);
         $view['can_invite'] = $view['project']['role'] === 'owner';
-        $view['export_url'] = Http::url('export-book', ['id' => $projectId]);
-        $view['invite_url'] = null;
-        if (session_status() === PHP_SESSION_ACTIVE) {
-            $inviteUrl = $_SESSION['studio_invite_url'] ?? null;
-            unset($_SESSION['studio_invite_url']);
-            $view['invite_url'] = is_string($inviteUrl) ? $inviteUrl : null;
+        $view['is_admin'] = !empty($this->user['is_admin']);
+        $view['filter'] = Http::query('filter') === 'mine' ? 'mine' : 'all';
+        $view['email_invites'] = $view['project']['role'] !== 'owner'
+            ? [] : (new EmailInviteService(
+                $this->database,
+                dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'storage'
+            ))->listForOwner($projectId, $this->userId());
+        $view['role_users'] = [];
+        if (!empty($this->user['is_admin'])) {
+            $view['role_users'] = (new UserAdminService(
+                $this->database
+            ))->castingUsers();
+            $knownUsers = array_fill_keys(
+                array_map(static fn (array $roleUser): int => $roleUser['id'], $view['role_users']),
+                true
+            );
+            foreach ($view['members'] as $member) {
+                if (!$member['is_active'] && !isset($knownUsers[$member['id']])) {
+                    $view['role_users'][] = [
+                        'id' => $member['id'],
+                        'name' => $member['name'],
+                        'email' => '',
+                        'is_active' => false,
+                    ];
+                }
+            }
         }
+        $view['export_url'] = Http::url('export-book', ['id' => $projectId]);
         Http::render('project', $view['project']['title'], $view, $this->user);
     }
 
@@ -188,7 +215,8 @@ final class StudioController
                 $lineId,
                 $this->userId(),
                 $file,
-                $takeToken
+                $takeToken,
+                !empty($this->user['is_admin'])
             );
         } catch (FormError $error) {
             Http::json(['ok' => false, 'message' => $error->getMessage()], 422);
@@ -211,37 +239,6 @@ final class StudioController
     }
 
     /**
-     * Create an owner-only, single-use collaborator invitation.
-     *
-     * @return void
-     */
-    public function invite(): void
-    {
-        if (Http::method() !== 'POST') {
-            throw new HttpError(405, 'Metoda není podporována.');
-        }
-        Http::requireCsrf();
-        $projectId = Http::queryId('id');
-        if ($projectId === null) {
-            throw new HttpError(404, 'Kniha nebyla nalezena.');
-        }
-        try {
-            $token = $this->service->createInvite($projectId, $this->userId());
-        } catch (FormError $error) {
-            throw new HttpError(403, $error->getMessage());
-        }
-        $url = Http::url('join', ['token' => $token]);
-        if (session_status() === PHP_SESSION_ACTIVE) {
-            $_SESSION['studio_invite_url'] = $url;
-        }
-        Http::notice('success', 'Jednorázový odkaz k pozvánce je připraven.');
-        Http::redirect('project', [
-            'id' => $projectId,
-            'page' => Http::postId('page') ?? 1,
-        ]);
-    }
-
-    /**
      * Assign or clear one script character for a project member.
      *
      * @return void No value is returned.
@@ -258,63 +255,35 @@ final class StudioController
         }
         $page = Http::postId('page') ?? 1;
         $userId = $this->userId();
-        if (!$this->model->isOwner($projectId, $userId)) {
-            throw new HttpError(403, 'Obsazení může upravit pouze autor knihy.');
+        if (empty($this->user['is_admin'])) {
+            throw new HttpError(403, 'Obsazení může upravit pouze správce.');
         }
         $character = Http::post('character');
-        $targetValue = Http::post('user_id');
-        $targetUserId = null;
-        if ($targetValue !== '' && $targetValue !== '0') {
-            $targetUserId = Http::postId('user_id');
-            if ($targetUserId === null) {
-                Http::notice('error', 'Vyberte platného člena knihy.');
-                Http::redirect('project', ['id' => $projectId, 'page' => $page]);
-            }
+        $targetUserId = Http::postId('user_id');
+        if ($targetUserId === null) {
+            Http::notice('error', 'Vyberte platný účet.');
+            Http::redirect('project', [
+                'id' => $projectId,
+                'page' => $page,
+                'filter' => Http::post('filter') ?: 'all',
+            ]);
         }
+        $assigned = Http::post('assigned') === '1';
         try {
-            $this->service->assignVoice(
-                $projectId,
-                $userId,
-                $character,
-                $targetUserId
+            (new UserAdminService($this->database))->setRole(
+                $userId, $targetUserId, $projectId, $character, $assigned
             );
         } catch (FormError $error) {
             Http::notice('error', $error->getMessage());
-            Http::redirect('project', ['id' => $projectId, 'page' => $page]);
+            Http::redirect('project', ['id' => $projectId, 'page' => $page, 'cast' => 1]);
         }
-        Http::notice('success', 'Obsazení postavy bylo aktualizováno.');
+        Http::notice('success', $assigned ? 'Hlas byl přiřazen.' : 'Hlas byl odebrán.');
         Http::redirect('project', [
             'id' => $projectId,
             'page' => $page,
+            'filter' => Http::post('filter') ?: 'all',
+            'cast' => 1,
         ]);
-    }
-
-    /**
-     * Preview and claim a one-time invitation for the signed-in user.
-     *
-     * @return void
-     */
-    public function join(): void
-    {
-        $token = (string) Http::query('token');
-        if (Http::method() === 'POST') {
-            Http::requireCsrf();
-            try {
-                $projectId = $this->service->claimInvite($token, $this->userId());
-            } catch (FormError $error) {
-                Http::notice('error', $error->getMessage());
-                Http::redirect('projects');
-            }
-            Http::redirect('project', ['id' => $projectId]);
-        }
-        if (Http::method() !== 'GET') {
-            throw new HttpError(405, 'Metoda není podporována.');
-        }
-        $validToken = preg_match('/\A[a-f0-9]{64}\z/D', $token) === 1;
-        Http::render('join', 'Pozvánka do knihy', [
-            'token' => $validToken ? $token : '',
-            'valid' => $validToken,
-        ], $this->user);
     }
 
     /**
@@ -337,11 +306,16 @@ final class StudioController
                 $projectId,
                 $lineId,
                 $recordingId,
-                $this->userId()
+                $this->userId(),
+                !empty($this->user['is_admin'])
             )) {
             throw new HttpError(403, 'Tento záznam nelze vybrat.');
         }
-        Http::redirect('project', ['id' => $projectId, 'page' => $page]);
+        Http::redirect('project', [
+            'id' => $projectId,
+            'page' => $page,
+            'filter' => Http::post('filter') ?: 'all',
+        ]);
     }
 
     /**
@@ -368,7 +342,8 @@ final class StudioController
                 $projectId,
                 $lineId,
                 $recordingId,
-                $this->userId()
+                $this->userId(),
+                !empty($this->user['is_admin'])
             );
         } catch (FormError $error) {
             Http::notice('error', $error->getMessage());
@@ -398,7 +373,8 @@ final class StudioController
         try {
             $archive = $this->service->createBookArchive(
                 $projectId,
-                $this->userId()
+                $this->userId(),
+                !empty($this->user['is_admin'])
             );
         } catch (FormError $error) {
             throw new HttpError(422, $error->getMessage());
@@ -439,7 +415,11 @@ final class StudioController
         $recordingId = Http::queryId('id');
         $opened = $recordingId === null
             ? null
-            : $this->service->openRecording($recordingId, $this->userId());
+            : $this->service->openRecording(
+                $recordingId,
+                $this->userId(),
+                !empty($this->user['is_admin'])
+            );
         if ($opened === null) {
             throw new HttpError(404, 'Nahrávka nebyla nalezena.');
         }

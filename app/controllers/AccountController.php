@@ -100,38 +100,6 @@ final class AccountController
         ]);
     }
 
-    /** Show or process open registration for project-access links.
-     * @param AuthService $auth Authentication service.
-     * @return void No return value.
-     */
-    public function register(AuthService $auth): void
-    {
-        if ($auth->currentUser() !== null) {
-            Http::redirectAfterLogin();
-        }
-        $errors = [];
-        $values = ['name' => '', 'email' => ''];
-        if (Http::method() === 'POST') {
-            Http::requireCsrf();
-            $values = ['name' => Http::post('name'), 'email' => Http::post('email')];
-            try {
-                $auth->register(
-                    $values['name'], $values['email'], Http::post('password', false),
-                    Http::post('password_confirm', false)
-                );
-                Http::notice('success', 'Účet je vytvořen. Nyní se můžete přihlásit.');
-                Http::redirect('login');
-            } catch (FormError $error) {
-                $errors[] = $error->getMessage();
-            } catch (\PDOException $error) {
-                $errors[] = 'Databázové nastavení se nezdařilo. Ověřte připojení a oprávnění databázového uživatele.';
-            }
-        }
-        Http::render('register', 'Registrace', [
-            'errors' => $errors, 'values' => $values,
-        ]);
-    }
-
     /** Show or process a password change for the authenticated account.
      * @param AuthService $auth Authentication service.
      * @return void No return value.
