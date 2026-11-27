@@ -24,19 +24,6 @@ final class RecordingStorage
     private const MAX_BYTES = 33554432;
 
 
-    /** @var list<string> Detected content formats accepted for audio. */
-    private const ALLOWED_MIME_TYPES = [
-        'audio/webm',
-        'video/webm',
-        'audio/ogg',
-        'application/ogg',
-        'audio/mp4',
-        'video/mp4',
-        'audio/x-m4a',
-        'audio/wav',
-        'audio/x-wav',
-        'audio/vnd.wave',
-    ];
 
     /**
      * Prepare private recording storage.
@@ -71,8 +58,9 @@ final class RecordingStorage
         }
         $finfo = new \finfo(FILEINFO_MIME_TYPE);
         $mime = $finfo->file($file['tmp_name']);
-        if (!is_string($mime) || !in_array($mime, self::ALLOWED_MIME_TYPES, true)) {
-            throw new FormError('Podporujeme nahrávky WebM, Ogg, M4A/MP4 a WAV.');
+        if ($mime !== 'audio/mpeg'
+            || !$this->hasValidMp3Frame($file['tmp_name'], $actualSize)) {
+            throw new FormError('Nový pokus musí být platná nahrávka MP3.');
         }
         $key = bin2hex(random_bytes(32));
         $directory = rtrim($this->storageDirectory, DIRECTORY_SEPARATOR)
@@ -89,7 +77,85 @@ final class RecordingStorage
         return ['key' => $key, 'mime' => $mime, 'size' => $file['size']];
     }
 
+
     /**
+     * Verify an MPEG Layer III frame in a detected audio/mpeg file.
+     *
+     * @param string $path Temporary uploaded file path.
+     * @param int $size Verified finite file size in bytes.
+     * @return bool True when a complete valid Layer III frame is present.
+     */
+    private function hasValidMp3Frame(string $path, int $size): bool
+    {
+        $stream = fopen($path, 'rb');
+        if (!is_resource($stream)) {
+            return false;
+        }
+        try {
+            $prefix = fread($stream, 10);
+            if (!is_string($prefix)) {
+                return false;
+            }
+            $offset = 0;
+            if (str_starts_with($prefix, 'ID3')) {
+                if (strlen($prefix) !== 10) {
+                    return false;
+                }
+                for ($index = 6; $index <= 9; ++$index) {
+                    if ((ord($prefix[$index]) & 0x80) !== 0) {
+                        return false;
+                    }
+                }
+                $tagSize = (ord($prefix[6]) << 21)
+                    | (ord($prefix[7]) << 14)
+                    | (ord($prefix[8]) << 7)
+                    | ord($prefix[9]);
+                $footerSize = ord($prefix[3]) === 4
+                    && (ord($prefix[5]) & 0x10) !== 0 ? 10 : 0;
+                $offset = 10 + $tagSize + $footerSize;
+            }
+            if ($offset + 4 > $size || fseek($stream, $offset) !== 0) {
+                return false;
+            }
+            $bytes = fread($stream, 4);
+            if (!is_string($bytes) || strlen($bytes) !== 4) {
+                return false;
+            }
+            $unpacked = unpack('Nheader', $bytes);
+            if (!is_array($unpacked)) {
+                return false;
+            }
+            $header = $unpacked['header'];
+            $version = ($header >> 19) & 0x03;
+            $layer = ($header >> 17) & 0x03;
+            $bitrateIndex = ($header >> 12) & 0x0F;
+            $sampleRateIndex = ($header >> 10) & 0x03;
+            if (($header & 0xFFE00000) !== 0xFFE00000
+                || $version === 1
+                || $layer !== 1
+                || $bitrateIndex === 0 || $bitrateIndex === 15
+                || $sampleRateIndex === 3) {
+                return false;
+            }
+            $mpegOneBitrates = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
+            $mpegTwoBitrates = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
+            $sampleRates = [44100, 48000, 32000];
+            $sampleRate = $sampleRates[$sampleRateIndex];
+            if ($version === 2) {
+                $sampleRate = intdiv($sampleRate, 2);
+            } elseif ($version === 0) {
+                $sampleRate = intdiv($sampleRate, 4);
+            }
+            $bitrate = ($version === 3 ? $mpegOneBitrates : $mpegTwoBitrates)
+                [$bitrateIndex];
+            $padding = ($header >> 9) & 0x01;
+            $coefficient = $version === 3 ? 144000 : 72000;
+            $frameLength = intdiv($coefficient * $bitrate, $sampleRate) + $padding;
+            return $offset + $frameLength <= $size;
+        } finally {
+            fclose($stream);
+        }
+    }    /**
      * Delete a staged or obsolete file when present.
      *
      * @param string $key Random 64-character storage key.

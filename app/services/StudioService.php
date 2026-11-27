@@ -95,16 +95,16 @@ final class StudioService
     }
 
     /**
-     * Replace the current user's take for an authorized script line.
+     * Store one new attempt for an authorized script line.
      *
      * @param int $projectId Requested project.
      * @param int $lineId Requested script line.
      * @param int $userId Authenticated recorder.
      * @param array{name:string,type:string,tmp_name:string,error:int,size:int} $file PHP upload metadata.
-     * @return array{recording_id:int} Saved take identifier.
-     * @throws FormError When file or project access is invalid.
+     * @return array{recording_id:int,attempt_no:int,file_name:string} Saved take metadata.
+     * @throws FormError When file, project access, or attempt capacity is invalid.
      */
-    public function replaceTake(
+    public function addTake(
         int $projectId,
         int $lineId,
         int $userId,
@@ -112,7 +112,7 @@ final class StudioService
     ): array {
         $staged = $this->storage->stage($file);
         try {
-            $saved = $this->model->replaceTake(
+            $saved = $this->model->addRecording(
                 $projectId,
                 $lineId,
                 $userId,
@@ -124,10 +124,16 @@ final class StudioService
             $this->storage->delete($staged['key']);
             throw $exception;
         }
-        if ($saved['old_key'] !== null && $saved['old_key'] !== $saved['new_key']) {
-            $this->storage->delete($saved['old_key']);
-        }
-        return ['recording_id' => $saved['recording_id']];
+        return [
+            'recording_id' => $saved['recording_id'],
+            'attempt_no' => $saved['attempt_no'],
+            'file_name' => TakeNaming::fileName(
+                $saved['project_title'],
+                $saved['line_number'],
+                $saved['attempt_no'],
+                $staged['mime']
+            ),
+        ];
     }
 
     /**

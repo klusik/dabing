@@ -8,20 +8,20 @@ namespace Dabing;
  * Repository: klusik/dabing
  * File: app/services/ScriptImport.php
  * Module Type: Service
- * Purpose: Validate and decode imported script JSON.
- * Responsibilities: Enforce import limits and return ordered validated chapters.
+ * Purpose: Validate and decode imported script JSON versions 1 and 2.
+ * Responsibilities: Enforce import limits and normalize globally ordered lines.
  * Author: Rudolf Klusal
  * License: All rights reserved.
  */
 
-/** Validates the v1 JSON script import format. */
+/** Validates supported JSON script import formats. */
 final class ScriptImport
 {
     /**
      * Type: int; Units: bytes; Scope: script-import request; Consumers:
      * validate(); Rationale: bounds memory spent decoding user supplied JSON.
      */
-    public const MAX_BYTES = 2097152;
+    public const MAX_BYTES = 20000000;
 
     /**
      * Type: int; Units: JSON nesting levels; Scope: one import; Consumers:
@@ -60,17 +60,20 @@ final class ScriptImport
     private const MAX_TEXT_LENGTH = 10000;
 
     /**
-     * Validate and decode a v1 script payload.
+     * Validate and decode a supported JSON script payload.
+     *
+     * Version 1 assigns numbers by ordered traversal. Version 2 requires the
+     * author to provide those same globally contiguous integers explicitly.
      *
      * @param string $json Raw JSON bytes supplied by the project author.
-     * @return array{title:string,chapters:list<array{title:string,lines:list<array{character:string,text:string}>}>}
-     *     Normalized, ordered script data.
-     * @throws FormError When JSON, structure, or configured limits are invalid.
+     * @return array{title:string,chapters:list<array{title:string,lines:list<array{number:int,character:string,text:string}>}>}
+     *     Normalized chapters with global one-based line numbers.
+     * @throws FormError When JSON, structure, numbering, or limits are invalid.
      */
     public function validate(string $json): array
     {
         if (strlen($json) > self::MAX_BYTES) {
-            throw new FormError('Scénář je příliš velký (nejvýše 2 MiB).');
+            throw new FormError('Scénář je příliš velký (nejvýše 20 MB).');
         }
 
         try {
@@ -79,11 +82,19 @@ final class ScriptImport
             throw new FormError('Scénář není platný JSON.');
         }
 
-        if (!($data instanceof \stdClass) || ($data->version ?? null) !== 1) {
-            throw new FormError('Scénář musí mít verzi 1.');
+        if (!($data instanceof \stdClass)) {
+            throw new FormError('Kořen scénáře musí být objekt JSON.');
+        }
+        $version = $data->version ?? null;
+        if (!is_int($version) || !in_array($version, [1, 2], true)) {
+            throw new FormError('Scénář musí používat verzi 1 nebo 2.');
         }
 
-        $title = $this->text($data->title ?? null, 'Název knihy', self::MAX_TITLE_LENGTH);
+        $title = $this->text(
+            $data->title ?? null,
+            'Název knihy',
+            self::MAX_TITLE_LENGTH
+        );
         $chapters = $data->chapters ?? null;
         if (!is_array($chapters) || !array_is_list($chapters) || $chapters === []) {
             throw new FormError('Kapitoly: očekává se neprázdné pole.');
@@ -94,6 +105,7 @@ final class ScriptImport
 
         $result = [];
         $lineCount = 0;
+        $expectedNumber = 1;
         foreach ($chapters as $chapterIndex => $chapter) {
             $location = 'Kapitola ' . ($chapterIndex + 1);
             if (!($chapter instanceof \stdClass)) {
@@ -113,12 +125,23 @@ final class ScriptImport
                 ++$lineCount;
                 $lineLocation = $location . ', replika ' . ($lineIndex + 1);
                 if ($lineCount > self::MAX_LINES) {
-                    throw new FormError($lineLocation . ': scénář překračuje limit 1000 replik.');
+                    throw new FormError(
+                        $lineLocation . ': scénář překračuje limit 1000 replik.'
+                    );
                 }
                 if (!($line instanceof \stdClass)) {
                     throw new FormError($lineLocation . ': očekává se objekt.');
                 }
+                if ($version === 2
+                    && (!is_int($line->number ?? null)
+                        || $line->number !== $expectedNumber)) {
+                    throw new FormError(
+                        $lineLocation . ': number musí být celé číslo '
+                        . $expectedNumber . ' v celkovém pořadí.'
+                    );
+                }
                 $normalizedLines[] = [
+                    'number' => $expectedNumber,
                     'character' => $this->text(
                         $line->character ?? null,
                         $lineLocation . ', postava',
@@ -130,6 +153,7 @@ final class ScriptImport
                         self::MAX_TEXT_LENGTH
                     ),
                 ];
+                ++$expectedNumber;
             }
             $result[] = ['title' => $chapterTitle, 'lines' => $normalizedLines];
         }

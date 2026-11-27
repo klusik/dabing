@@ -85,9 +85,10 @@ CREATE TABLE IF NOT EXISTS dabing_recordings (
     storage_key CHAR(64) NOT NULL,
     media_type VARCHAR(64) NOT NULL,
     byte_size INT UNSIGNED NOT NULL,
+    attempt_no SMALLINT UNSIGNED NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uq_dabing_recording_user_line (line_id, user_id),
+    UNIQUE KEY uq_dabing_recording_line_attempt (line_id, attempt_no),
     UNIQUE KEY uq_dabing_recording_storage_key (storage_key),
     CONSTRAINT fk_dabing_recordings_line
         FOREIGN KEY (line_id) REFERENCES dabing_script_lines (id)

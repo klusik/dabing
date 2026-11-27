@@ -70,7 +70,7 @@ final class StudioModel
      * Insert a new project with ordered chapters and lines in one transaction.
      *
      * @param int $ownerId Owner's authenticated user identifier.
-     * @param array{title:string,chapters:list<array{title:string,lines:list<array{character:string,text:string}>}>} $script Validated import.
+     * @param array{title:string,chapters:list<array{title:string,lines:list<array{number:int,character:string,text:string}>}>} $script Validated import.
      * @return int New project identifier.
      */
     public function createProject(int $ownerId, array $script): int
@@ -144,7 +144,7 @@ final class StudioModel
      *
      * @param int $projectId Requested project identifier.
      * @param int $userId Authenticated viewer identifier.
-     * @return array{project:array{id:int,title:string,role:string},chapters:list<array{id:int,title:string,lines:list<array{id:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,takes:list<array{id:int,user_id:int,user_name:string,created_at:string,is_selected:bool}>}>}>,members:list<array{id:int,name:string,role:string}>}|null
+     * @return array{project:array{id:int,title:string,role:string},chapters:list<array{id:int,title:string,lines:list<array{id:int,number:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,takes:list<array{id:int,attempt_no:int,media_type:string,user_id:int,user_name:string,created_at:string,is_selected:bool}>}>}>,members:list<array{id:int,name:string,role:string}>}|null
      *     Ordered project data, or null when access is not allowed.
      */
     public function projectView(int $projectId, int $userId): ?array
@@ -174,10 +174,12 @@ final class StudioModel
         $chapterQuery->execute([$projectId]);
         $chapterRows = $chapterQuery->fetchAll(PDO::FETCH_ASSOC);
         $chapters = [];
+        $globalLineNumber = 0;
         $lineQuery = $this->database->prepare(
             'SELECT l.id, l.position, l.character_name, l.text,
                     l.selected_recording_id, selected.user_id AS selected_user_id,
                     r.id AS recording_id, r.user_id AS recording_user_id,
+                    r.attempt_no, r.media_type,
                     u.name AS user_name, r.created_at
              FROM dabing_script_lines l
              LEFT JOIN dabing_recordings selected
@@ -195,8 +197,10 @@ final class StudioModel
                 $lineId = (int) $row['id'];
                 $lineIndex = count($lines) - 1;
                 if ($lineIndex < 0 || $lines[$lineIndex]['id'] !== $lineId) {
+                    ++$globalLineNumber;
                     $lines[] = [
                         'id' => $lineId,
+                        'number' => $globalLineNumber,
                         'position' => (int) $row['position'],
                         'character' => (string) $row['character_name'],
                         'text' => (string) $row['text'],
@@ -211,6 +215,8 @@ final class StudioModel
                 if ($row['recording_id'] !== null) {
                     $lines[$lineIndex]['takes'][] = [
                         'id' => (int) $row['recording_id'],
+                        'attempt_no' => (int) $row['attempt_no'],
+                        'media_type' => (string) $row['media_type'],
                         'user_id' => (int) $row['recording_user_id'],
                         'user_name' => (string) $row['user_name'],
                         'created_at' => (string) $row['created_at'],
@@ -398,18 +404,18 @@ final class StudioModel
     }
 
     /**
-     * Replace a user's existing take for a line with a stored file reference.
+     * Append a new attempt after locking the authorized script line.
      *
      * @param int $projectId Project scope for authorization.
-     * @param int $lineId Script line receiving the take.
+     * @param int $lineId Script line receiving the new take.
      * @param int $userId Authenticated recorder.
      * @param string $storageKey Random non-executable relative storage key.
-     * @param string $mediaType Detected MIME type, never client supplied.
-     * @param int $byteSize Validated upload size.
-     * @return array{new_key:string,old_key:?string,recording_id:int} Persisted take and previous file.
-     * @throws FormError When user does not belong to the project.
+     * @param string $mediaType Verified audio MIME type.
+     * @param int $byteSize Verified upload size.
+     * @return array{storage_key:string,recording_id:int,attempt_no:int,line_number:int,project_title:string} Persisted take and naming data.
+     * @throws FormError When access is denied or the attempt cap is exhausted.
      */
-    public function replaceTake(
+    public function addRecording(
         int $projectId,
         int $lineId,
         int $userId,
@@ -420,54 +426,65 @@ final class StudioModel
         $this->database->beginTransaction();
         try {
             $access = $this->database->prepare(
-                'SELECT l.id, p.owner_user_id
+                'SELECT p.title, c.project_id, c.position AS chapter_position,
+                        l.position AS line_position,
+                        (SELECT COUNT(*)
+                         FROM dabing_project_chapters prior_chapter
+                         JOIN dabing_script_lines prior_line
+                           ON prior_line.chapter_id = prior_chapter.id
+                         WHERE prior_chapter.project_id = c.project_id
+                           AND (prior_chapter.position < c.position
+                             OR (prior_chapter.position = c.position
+                               AND prior_line.position <= l.position))) AS line_number
                  FROM dabing_script_lines l
                  JOIN dabing_project_chapters c ON c.id = l.chapter_id
                  JOIN dabing_projects p ON p.id = c.project_id
                  JOIN dabing_project_members m ON m.project_id = p.id
-                 WHERE p.id = ? AND l.id = ? AND m.user_id = ? FOR UPDATE'
+                 WHERE p.id = ? AND l.id = ? AND m.user_id = ?
+                 FOR UPDATE'
             );
             $access->execute([$projectId, $lineId, $userId]);
             $line = $access->fetch(PDO::FETCH_ASSOC);
             if (!is_array($line)) {
                 throw new FormError('K této replice nemáte přístup.');
             }
-            $old = $this->database->prepare(
-                'SELECT id, storage_key FROM dabing_recordings
-                 WHERE line_id = ? AND user_id = ? FOR UPDATE'
+
+            $lastAttempt = $this->database->prepare(
+                'SELECT COALESCE(MAX(attempt_no), 0)
+                 FROM dabing_recordings WHERE line_id = ?'
             );
-            $old->execute([$lineId, $userId]);
-            $previous = $old->fetch(PDO::FETCH_ASSOC);
-            $newKey = $storageKey;
-            if (is_array($previous)) {
-                $update = $this->database->prepare(
-                    'UPDATE dabing_recordings
-                     SET storage_key = ?, media_type = ?, byte_size = ?, created_at = NOW()
-                     WHERE id = ?'
-                );
-                $update->execute([$storageKey, $mediaType, $byteSize, $previous['id']]);
-                $recordingId = (int) $previous['id'];
-                $oldKey = (string) $previous['storage_key'];
-            } else {
-                $insert = $this->database->prepare(
-                    'INSERT INTO dabing_recordings
-                        (line_id, user_id, storage_key, media_type, byte_size)
-                     VALUES (?, ?, ?, ?, ?)'
-                );
-                $insert->execute([$lineId, $userId, $storageKey, $mediaType, $byteSize]);
-                $recordingId = (int) $this->database->lastInsertId();
-                $oldKey = null;
-                $selection = $this->database->prepare(
-                    'UPDATE dabing_script_lines SET selected_recording_id = ?
-                     WHERE id = ? AND selected_recording_id IS NULL'
-                );
-                $selection->execute([$recordingId, $lineId]);
+            $lastAttempt->execute([$lineId]);
+            $attemptNo = (int) $lastAttempt->fetchColumn() + 1;
+            if ($attemptNo > TakeNaming::MAX_ATTEMPTS) {
+                throw new FormError('Tato replika už má maximální počet pokusů.');
             }
+
+            $insert = $this->database->prepare(
+                'INSERT INTO dabing_recordings
+                    (line_id, user_id, storage_key, media_type, byte_size, attempt_no)
+                 VALUES (?, ?, ?, ?, ?, ?)'
+            );
+            $insert->execute([
+                $lineId,
+                $userId,
+                $storageKey,
+                $mediaType,
+                $byteSize,
+                $attemptNo,
+            ]);
+            $recordingId = (int) $this->database->lastInsertId();
+            $selection = $this->database->prepare(
+                'UPDATE dabing_script_lines SET selected_recording_id = ?
+                 WHERE id = ? AND selected_recording_id IS NULL'
+            );
+            $selection->execute([$recordingId, $lineId]);
             $this->database->commit();
             return [
-                'new_key' => $newKey,
-                'old_key' => $oldKey,
+                'storage_key' => $storageKey,
                 'recording_id' => $recordingId,
+                'attempt_no' => $attemptNo,
+                'line_number' => (int) $line['line_number'],
+                'project_title' => (string) $line['title'],
             ];
         } catch (\Throwable $exception) {
             if ($this->database->inTransaction()) {
@@ -478,19 +495,29 @@ final class StudioModel
     }
 
     /**
-     * Fetch a recording only when the user remains a project member.
+     * Fetch authorized recording and its ordered filename context.
      *
-     * @param int $recordingId Requested audio take identifier.
+     * @param int $recordingId Requested recording identifier.
      * @param int $userId Authenticated user identifier.
-     * @return array{id:int,project_id:int,storage_key:string,media_type:string,byte_size:int}|null Authorized take or null.
+     * @return array{id:int,project_id:int,project_title:string,line_number:int,attempt_no:int,storage_key:string,media_type:string,byte_size:int}|null Authorized take or null.
      */
     public function recordingForUser(int $recordingId, int $userId): ?array
     {
         $statement = $this->database->prepare(
-            'SELECT r.id, c.project_id, r.storage_key, r.media_type, r.byte_size
+            'SELECT r.id, c.project_id, p.title AS project_title,
+                    r.attempt_no, r.storage_key, r.media_type, r.byte_size,
+                    (SELECT COUNT(*)
+                     FROM dabing_project_chapters prior_chapter
+                     JOIN dabing_script_lines prior_line
+                       ON prior_line.chapter_id = prior_chapter.id
+                     WHERE prior_chapter.project_id = c.project_id
+                       AND (prior_chapter.position < c.position
+                         OR (prior_chapter.position = c.position
+                           AND prior_line.position <= l.position))) AS line_number
              FROM dabing_recordings r
              JOIN dabing_script_lines l ON l.id = r.line_id
              JOIN dabing_project_chapters c ON c.id = l.chapter_id
+             JOIN dabing_projects p ON p.id = c.project_id
              JOIN dabing_project_members m ON m.project_id = c.project_id
              WHERE r.id = ? AND m.user_id = ?'
         );
@@ -499,6 +526,9 @@ final class StudioModel
         return is_array($row) ? [
             'id' => (int) $row['id'],
             'project_id' => (int) $row['project_id'],
+            'project_title' => (string) $row['project_title'],
+            'line_number' => (int) $row['line_number'],
+            'attempt_no' => (int) $row['attempt_no'],
             'storage_key' => (string) $row['storage_key'],
             'media_type' => (string) $row['media_type'],
             'byte_size' => (int) $row['byte_size'],

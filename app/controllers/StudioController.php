@@ -25,6 +25,12 @@ final class StudioController
      */
     private const AUDIO_CHUNK_BYTES = 8192;
 
+    /**
+     * Type: int; Units: bytes; Scope: multipart form overhead; Consumers:
+     * scriptLimits(); Rationale: reserve 1 MiB for boundaries and form fields.
+     */
+    private const SCRIPT_MULTIPART_HEADROOM_BYTES = 1048576;
+
     private readonly StudioModel $model;
     private readonly StudioService $service;
 
@@ -57,6 +63,13 @@ final class StudioController
     public function projects(): void
     {
         if (Http::method() === 'POST') {
+            if ($this->requestBodyExceedsPostLimit()) {
+                Http::notice(
+                    'error',
+                    'Požadavek přesahuje limit post_max_size. Zvyšte limit nebo zvolte menší soubor.'
+                );
+                Http::redirect('projects');
+            }
             Http::requireCsrf();
             try {
                 $projectId = $this->service->createProject(
@@ -70,7 +83,12 @@ final class StudioController
             Http::redirect('project', ['id' => $projectId]);
         }
         $projects = $this->model->projectsForUser($this->userId());
-        Http::render('projects', 'Moje knihy', ['projects' => $projects], $this->user);
+        $limits = $this->scriptLimits();
+        Http::render('projects', 'Moje knihy', [
+            'projects' => $projects,
+            'max_script_bytes' => $limits['file'],
+            'max_script_paste_bytes' => $limits['paste'],
+        ], $this->user);
     }
 
     /**
@@ -91,6 +109,28 @@ final class StudioController
         if ($view === null) {
             throw new HttpError(404, 'Kniha nebyla nalezena.');
         }
+        foreach ($view['chapters'] as &$chapter) {
+            foreach ($chapter['lines'] as &$line) {
+                foreach ($line['takes'] as &$take) {
+                    $take['file_name'] = TakeNaming::fileName(
+                        $view['project']['title'],
+                        $line['number'],
+                        $take['attempt_no'],
+                        $take['media_type']
+                    );
+                    $take['audio_url'] = Http::url(
+                        'audio', ['id' => $take['id']]
+                    );
+                    $take['download_url'] = Http::url('audio', [
+                        'id' => $take['id'],
+                        'download' => 1,
+                    ]);
+                }
+                unset($take);
+            }
+            unset($line);
+        }
+        unset($chapter);
         $view['can_invite'] = $view['project']['role'] === 'owner';
         $view['invite_url'] = null;
         if (session_status() === PHP_SESSION_ACTIVE) {
@@ -120,7 +160,7 @@ final class StudioController
             return;
         }
         try {
-            $result = $this->service->replaceTake(
+            $result = $this->service->addTake(
                 $projectId,
                 $lineId,
                 $this->userId(),
@@ -132,8 +172,15 @@ final class StudioController
         }
         Http::json([
             'ok' => true,
-            'message' => 'Nahrávka byla uložena.',
+            'message' => 'Nový pokus byl uložen.',
             'recording_id' => $result['recording_id'],
+            'attempt_no' => $result['attempt_no'],
+            'file_name' => $result['file_name'],
+            'audio_url' => Http::url('audio', ['id' => $result['recording_id']]),
+            'download_url' => Http::url('audio', [
+                'id' => $result['recording_id'],
+                'download' => 1,
+            ]),
         ]);
     }
 
@@ -239,6 +286,13 @@ final class StudioController
         }
         $recording = $opened['recording'];
         $stream = $opened['stream'];
+        $download = Http::query('download') === '1';
+        $fileName = TakeNaming::fileName(
+            $recording['project_title'],
+            $recording['line_number'],
+            $recording['attempt_no'],
+            $recording['media_type']
+        );
         $size = (int) $recording['byte_size'];
         $start = 0;
         $end = $size - 1;
@@ -290,6 +344,12 @@ final class StudioController
         header('Accept-Ranges: bytes');
         header('Cache-Control: private, no-store, no-cache, must-revalidate');
         header('X-Content-Type-Options: nosniff');
+        if ($download) {
+            header(
+                'Content-Disposition: attachment; filename="' . $fileName
+                . '"; filename*=UTF-8\'\'' . rawurlencode($fileName)
+            );
+        }
         if ($status === 206) {
             header('Content-Range: bytes ' . $start . '-' . $end . '/' . $size);
         }
@@ -308,21 +368,123 @@ final class StudioController
     }
 
     /**
-     * Read JSON from the selected import file or text fallback field.
+     * Return effective file-import and paste limits after PHP configuration.
      *
-     * @return string Raw JSON payload within the import byte limit.
-     * @throws FormError When the selected upload cannot be read safely.
+     * @return array{file:int,paste:int} Byte caps for the two script entry paths.
+     */
+    private function scriptLimits(): array
+    {
+        $postLimit = $this->iniByteLimit('post_max_size');
+        $usablePostLimit = max(
+            0,
+            $postLimit - self::SCRIPT_MULTIPART_HEADROOM_BYTES
+        );
+        return [
+            'file' => min(
+                ScriptImport::MAX_BYTES,
+                $this->iniByteLimit('upload_max_filesize'),
+                $usablePostLimit
+            ),
+            'paste' => min(ScriptImport::MAX_BYTES, $usablePostLimit),
+        ];
+    }
+
+    /**
+     * Parse a PHP INI size quantity without PHP 8.2-only helpers.
+     *
+     * @param string $directive Name of a byte-size PHP INI setting.
+     * @return int Parsed byte limit, or PHP_INT_MAX for an unlimited setting.
+     */
+    private function iniByteLimit(string $directive): int
+    {
+        $value = ini_get($directive);
+        if (!is_string($value)) {
+            return PHP_INT_MAX;
+        }
+        if (preg_match('/\\A(-?\\d+)\\s*([KMG]?)B?\\z/i', trim($value), $matches) !== 1) {
+            return 0;
+        }
+        $amount = (int) $matches[1];
+        if ($amount <= 0) {
+            return PHP_INT_MAX;
+        }
+        $scale = match (strtoupper($matches[2])) {
+            'K' => 1024,
+            'M' => 1048576,
+            'G' => 1073741824,
+            default => 1,
+        };
+        if ($amount > intdiv(PHP_INT_MAX, $scale)) {
+            return PHP_INT_MAX;
+        }
+        return $amount * $scale;
+    }
+
+    /**
+     * Detect a request PHP discarded because its content length exceeds post_max_size.
+     *
+     * @return bool True when the declared request body exceeds the configured cap.
+     */
+    private function requestBodyExceedsPostLimit(): bool
+    {
+        $contentLength = $_SERVER['CONTENT_LENGTH'] ?? null;
+        if (!is_string($contentLength) || !ctype_digit($contentLength)) {
+            return false;
+        }
+        $requestBytes = filter_var($contentLength, FILTER_VALIDATE_INT);
+        return $requestBytes !== false
+            && $requestBytes > $this->iniByteLimit('post_max_size');
+    }
+
+    /**
+     * Read bounded JSON from the selected file or paste fallback.
+     *
+     * @return string Raw JSON bytes within the effective input limit.
+     * @throws FormError When upload, size, or request data is invalid.
      */
     private function scriptPayload(): string
     {
+        $limits = $this->scriptLimits();
         $file = Http::file('script_file');
-        if ($file === null || $file['error'] === UPLOAD_ERR_NO_FILE) {
-            return (string) Http::post('script', false);
+        if ($file === null) {
+            if ($this->requestBodyExceedsPostLimit()) {
+                throw new FormError('Požadavek překračuje limit post_max_size.');
+            }
+            if (array_key_exists('script_file', $_FILES)) {
+                $rawFile = $_FILES['script_file'];
+                if (is_array($rawFile) && is_numeric($rawFile['size'] ?? null)
+                    && (int) $rawFile['size'] > $limits['file']) {
+                    throw new FormError(
+                        'Soubor scénáře překračuje aktuální limit '
+                        . $limits['file'] . ' bajtů.'
+                    );
+                }
+                throw new FormError('Nahrané metadata souboru scénáře nejsou platná.');
+            }
+            $script = (string) Http::post('script', false);
+            if (strlen($script) > $limits['paste']) {
+                throw new FormError(
+                    'Vložený scénář překračuje aktuální limit '
+                    . $limits['paste'] . ' bajtů.'
+                );
+            }
+            return $script;
+        }
+        if ($file['error'] === UPLOAD_ERR_NO_FILE) {
+            $script = (string) Http::post('script', false);
+            if (strlen($script) > $limits['paste']) {
+                throw new FormError(
+                    'Vložený scénář překračuje aktuální limit '
+                    . $limits['paste'] . ' bajtů.'
+                );
+            }
+            return $script;
         }
         if ($file['error'] !== UPLOAD_ERR_OK) {
             $message = match ($file['error']) {
                 UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE =>
-                    'Soubor scénáře přesahuje limit serveru nebo 2 MiB.',
+                    'Soubor scénáře překračuje aktuální limit '
+                    . $limits['file'] . ' bajtů.',
                 UPLOAD_ERR_PARTIAL => 'Soubor scénáře se nahrál pouze částečně.',
                 UPLOAD_ERR_NO_TMP_DIR => 'Server nemá dočasné úložiště uploadů.',
                 UPLOAD_ERR_CANT_WRITE => 'Server nemohl soubor scénáře uložit.',
@@ -332,21 +494,24 @@ final class StudioController
             throw new FormError($message);
         }
         if ($file['size'] < 1
-            || $file['size'] > ScriptImport::MAX_BYTES
+            || $file['size'] > $limits['file']
             || !is_uploaded_file($file['tmp_name'])) {
-            throw new FormError('Soubor scénáře je neplatný nebo přesahuje 2 MiB.');
+            throw new FormError(
+                'Soubor scénáře překračuje aktuální limit '
+                . $limits['file'] . ' bajtů nebo není platným uploadem.'
+            );
         }
         $contents = file_get_contents(
             $file['tmp_name'],
             false,
             null,
             0,
-            ScriptImport::MAX_BYTES + 1
+            $limits['file'] + 1
         );
         if (!is_string($contents)
             || strlen($contents) !== $file['size']
-            || strlen($contents) > ScriptImport::MAX_BYTES) {
-            throw new FormError('Soubor scénáře se nepodařilo přečíst.');
+            || strlen($contents) > $limits['file']) {
+            throw new FormError('Soubor scénáře se nepodařilo přečíst v celém rozsahu.');
         }
         return $contents;
     }

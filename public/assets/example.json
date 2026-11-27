@@ -1,13 +1,40 @@
 {
-  "version": 1,
-  "title": "Cesta domů",
+  "version": 2,
+  "title": "O pejskovi a kočičce",
   "chapters": [
     {
-      "title": "První kapitola",
+      "title": "Jak spolu hospodařili",
       "lines": [
-        {"character": "Vypravěč", "text": "Když se setmělo, ozvalo se za dveřmi tiché zaklepání."},
-        {"character": "Anna", "text": "Slyšel jsi to také?"},
-        {"character": "Marek", "text": "Ano. Zůstanu tady, zatímco se podíváš."}
+        {
+          "number": 1,
+          "character": "Vypravěč",
+          "text": "Byla jednou jedna chaloupka a v ní bydleli pejsek s kočičkou. Společně se starali o domácnost a každý den si rozdělili práci."
+        },
+        {
+          "number": 2,
+          "character": "Pejsek",
+          "text": "Dnes upečeme dort. Já přinesu mouku a ty připravíš mísu."
+        },
+        {
+          "number": 3,
+          "character": "Kočička",
+          "text": "Dobře, ale každý přidá jen jednu dobrou surovinu, aby se nám dort povedl."
+        }
+      ]
+    },
+    {
+      "title": "Návštěva",
+      "lines": [
+        {
+          "number": 4,
+          "character": "Vypravěč",
+          "text": "Když byl dort hotový, položili ho na stůl a zavolali sousedy. Každý dostal veliký kousek."
+        },
+        {
+          "number": 5,
+          "character": "Pejsek",
+          "text": "Příště upečeme ještě větší dort, abychom měli dost pro všechny."
+        }
       ]
     }
   ]
