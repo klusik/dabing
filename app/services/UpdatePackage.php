@@ -87,6 +87,7 @@ final class UpdatePackage
             '.htaccess',
             'index.php',
             'version.json',
+            'app/Bootstrap.php',
             'app/Http.php',
             'app/HttpError.php',
             'app/FormError.php',

@@ -24,7 +24,6 @@ $hasRelease = $release !== null;
 ?>
 <section class="auth-layout auth-centered update-layout">
     <div class="auth-card update-card">
-        <div class="card-kicker">Správa aplikace</div>
         <h1>Aktualizace</h1>
         <p class="update-current">Nainstalovaná verze <strong><?= Http::escape($currentVersion) ?></strong></p>
         <?php foreach ($errors as $error): ?>

@@ -27,12 +27,14 @@ zpracování `.htaccess`. Pro mikrofon otevřete web přes HTTPS nebo na
 
 Na WEDOSu použijte server a název databáze z administrace hostingu. Účet
 **web** patří do provozních údajů a účet **admin** poslouží k vytvoření tabulek.
-Průvodce ukládá provozní údaje. Do volitelného pole **Veřejná adresa**
-zadejte adresu z prohlížeče, například `https://dabing.example.cz/` nebo
-`https://example.cz/dabing/`. U existující instalace lze stejnou adresu
-nastavit pod klíčem `base_url` v `storage/config.php`. Tato adresa se používá
-pro odkazy, styly a přesměrování. Při prázdné hodnotě používá aplikace
-relativní odkazy vyhodnocené prohlížečem.
+Pro nasazení na `dabing.klusik.cz` nahrajte soubory do `www/subdom/dabing` a
+v instalačním průvodci zadejte do pole **Veřejná adresa**
+`https://dabing.klusik.cz/`. Pro jinou doménu nebo podsložku zadejte její
+veřejnou adresu, například `https://dabing.example.cz/` nebo
+`https://example.cz/dabing/`. Aplikace nemá pevně nastavenou veřejnou adresu.
+U existující instalace lze stejnou adresu nastavit pod klíčem `base_url` v
+`storage/config.php`. Tato adresa se používá pro odkazy, styly a přesměrování.
+Při prázdné hodnotě používá aplikace relativní odkazy vyhodnocené prohlížečem.
 
 - [Dokumentace databází WEDOS](https://kb.vedos.cz/webhosting-databaze/)
 - [Dokumentace konfigurace PHP WEDOS](https://kb.vedos.cz/webhosting-php/)
@@ -163,6 +165,13 @@ ověří jeho SHA-256, provede čekající DB migrace a nasadí aplikační soub
 Provozní instalace ukládá konfiguraci a nahrávky v chráněném adresáři
 `storage`. Pro updater potřebuje PHP rozšíření `curl` a `zip` a právo
 zápisu do adresáře aplikace.
+
+Kořenový `index.php` zůstává stabilním spouštěčem, proměnlivý dispatch je v
+`app/Bootstrap.php`. Pokud vydání změní i `index.php` a Windows Apache jej
+právě používá, updater změnu odmítne a vrátí ostatní soubory. Proveďte změnu
+ručně v režimu údržby: zastavte Apache, nahraďte `index.php` verzí
+`dabing/index.php` z ověřeného ZIP balíčku, Apache znovu spusťte a aktualizaci
+opakujte.
 
 Pokud běžný DB účet nemůže měnit schéma, zadejte databázový účet s právy
 pro danou migraci v části **Databázová oprávnění**. Aplikace jej použije jen

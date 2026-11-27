@@ -360,6 +360,14 @@ final class UpdateService
         if (is_link($destination) || (file_exists($destination) && !is_file($destination))) {
             throw new HttpError(503, 'Cílový soubor aktualizace není bezpečný.');
         }
+        if (is_file($destination)) {
+            $sourceHash = hash_file('sha256', $sourcePath);
+            $destinationHash = hash_file('sha256', $destination);
+            if (is_string($sourceHash) && is_string($destinationHash)
+                && hash_equals($destinationHash, $sourceHash)) {
+                return;
+            }
+        }
         $temporary = $destination . '.update-' . bin2hex(random_bytes(8));
         if (!copy($sourcePath, $temporary)) {
             throw new HttpError(500, 'Nový soubor aktualizace nelze připravit.');
@@ -367,6 +375,12 @@ final class UpdateService
         @chmod($temporary, 0644);
         if (!rename($temporary, $destination)) {
             @unlink($temporary);
+            if (PHP_OS_FAMILY === 'Windows' && $relativePath === 'index.php') {
+                throw new HttpError(
+                    500,
+                    'Stabilní index.php nelze při běhu Windows nahradit. Proveďte aktualizaci v režimu údržby podle README.'
+                );
+            }
             throw new HttpError(500, 'Nový soubor aktualizace nelze uložit.');
         }
     }
