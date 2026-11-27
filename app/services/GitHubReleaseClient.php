@@ -103,10 +103,10 @@ final class GitHubReleaseClient
         }
         $tag = $release['tag_name'] ?? null;
         if (!is_string($tag)
-            || preg_match('/\Av(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z/D', $tag) !== 1) {
+            || preg_match('/\Av?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z/D', $tag) !== 1) {
             throw new HttpError(503, 'Vydání aplikace nemá platné číslo verze.');
         }
-        $version = substr($tag, 1);
+        $version = str_starts_with($tag, 'v') ? substr($tag, 1) : $tag;
         $assetName = 'dabing-' . $version . '.zip';
         $assets = $release['assets'] ?? null;
         if (!is_array($assets)) {
@@ -125,11 +125,12 @@ final class GitHubReleaseClient
         $digest = $asset['digest'] ?? null;
         $size = $asset['size'] ?? null;
         $url = $asset['browser_download_url'] ?? null;
+        $expectedUrl = self::REPOSITORY_RELEASE_PREFIX . $tag . '/' . $assetName;
         if (!is_string($digest)
             || preg_match('/\Asha256:([a-f0-9]{64})\z/D', $digest, $matches) !== 1
             || !is_int($size) || $size < 1 || $size > self::MAX_RELEASE_BYTES
             || !is_string($url)
-            || $url !== self::REPOSITORY_RELEASE_PREFIX . $tag . '/' . $assetName) {
+            || $url !== $expectedUrl) {
             throw new HttpError(503, 'Metadata ZIP balíčku nejsou platná.');
         }
         return [
@@ -155,10 +156,13 @@ final class GitHubReleaseClient
             || !array_key_exists('size', $release) || !is_int($release['size'])) {
             throw new HttpError(400, 'Údaje balíčku aktualizace nejsou platné.');
         }
-        $expectedUrl = self::REPOSITORY_RELEASE_PREFIX
-            . 'v' . $release['version'] . '/dabing-' . $release['version'] . '.zip';
+        $assetName = 'dabing-' . $release['version'] . '.zip';
+        $expectedUrls = [
+            self::REPOSITORY_RELEASE_PREFIX . $release['version'] . '/' . $assetName,
+            self::REPOSITORY_RELEASE_PREFIX . 'v' . $release['version'] . '/' . $assetName,
+        ];
         if (!$this->isValidVersion($release['version'])
-            || $release['url'] !== $expectedUrl
+            || !in_array($release['url'], $expectedUrls, true)
             || preg_match('/\A[a-f0-9]{64}\z/D', $release['sha256']) !== 1
             || $release['size'] < 1
             || $release['size'] > self::MAX_RELEASE_BYTES

@@ -27,10 +27,11 @@ zpracování `.htaccess`. Pro mikrofon otevřete web přes HTTPS nebo na
 
 Na WEDOSu použijte server a název databáze z administrace hostingu. Účet
 **web** patří do provozních údajů a účet **admin** poslouží k vytvoření tabulek.
-Pro nasazení na `dabing.klusik.cz` nahrajte soubory do `www/subdom/dabing` a
-v instalačním průvodci zadejte do pole **Veřejná adresa**
-`https://dabing.klusik.cz/`. Pro jinou doménu nebo podsložku zadejte její
-veřejnou adresu, například `https://dabing.example.cz/` nebo
+Pro nasazení na `dabing.klusik.cz` nahrajte obsah složky `dabing/` z ověřeného
+ZIP balíčku do `www/subdom/dabing`, včetně souboru `.htaccess`. V instalačním
+průvodci zadejte do pole **Veřejná adresa** `https://dabing.klusik.cz/`.
+Pro jinou doménu nebo podsložku zadejte její veřejnou adresu, například
+`https://dabing.example.cz/` nebo
 `https://example.cz/dabing/`. Aplikace nemá pevně nastavenou veřejnou adresu.
 U existující instalace lze stejnou adresu nastavit pod klíčem `base_url` v
 `storage/config.php`. Tato adresa se používá pro odkazy, styly a přesměrování.
@@ -185,10 +186,11 @@ Z ověřené revize sestavte balík mimo pracovní kopii.
 php scripts/build-update.php 0.1.0 ../dabing-0.1.0.zip
 ```
 
-Balík `dabing-0.1.0.zip` patří jako asset ke stabilnímu vydání
-`v0.1.0` v `klusik/dabing`. Verze ve staženém balíku musí odpovídat
-tagu a GitHub musí k assetu uvádět kontrolní součet SHA-256. Archiv má jediný
-kořen `dabing/`.
+Balík `dabing-0.1.0.zip` patří jako asset ke stabilnímu vydání s tagem
+`0.1.0` v `klusik/dabing`. Updater přijímá i tag s předponou, například
+`v0.1.0`. Verze ve staženém balíku musí odpovídat tagu a GitHub musí k assetu
+uvádět kontrolní součet SHA-256. Archiv má jediný kořen `dabing/`.
+Na WEDOSu nasazujte obsah složky podle umístění uvedeného výše.
 
 Migrace jsou soubory `database/migrations/0001_nazev.php`, které vracejí
 seznam SQL příkazů. Probíhají v pořadí názvů souborů. Dokončenou migraci
