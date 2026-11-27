@@ -256,6 +256,7 @@ final class UpdatePackage
             'LICENSE.md',
             'COPYING',
             'COPYING.txt',
+            'public/.htaccess',
             'scripts/create-install-key.php',
             'scripts/migrate_recording_attempts.php',
             'storage/.htaccess',

@@ -28,7 +28,7 @@ zpracování `.htaccess`. Pro mikrofon otevřete web přes HTTPS nebo na
 Na WEDOSu použijte server a název databáze z administrace hostingu. Účet
 **web** patří do provozních údajů a účet **admin** poslouží k vytvoření tabulek.
 Pro nasazení na `dabing.klusik.cz` nahrajte obsah složky `dabing/` z ověřeného
-ZIP balíčku do `www/subdom/dabing`, včetně souboru `.htaccess`. V instalačním
+ZIP balíčku do `www/subdom/dabing`, včetně souborů `.htaccess`. V instalačním
 průvodci zadejte do pole **Veřejná adresa** `https://dabing.klusik.cz/`.
 Pro jinou doménu nebo podsložku zadejte její veřejnou adresu, například
 `https://dabing.example.cz/` nebo
