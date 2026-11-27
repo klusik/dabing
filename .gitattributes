@@ -7,3 +7,9 @@
 *.md text eol=lf
 *.yml text eol=lf
 .htaccess text eol=lf
+
+# Preserve exact upstream vendor files, including original whitespace.
+public/assets/lame-all.js -text -whitespace
+docs/third-party/lamejs-LICENSE.txt -text -whitespace
+docs/third-party/LGPL-3.0.txt -text -whitespace
+docs/third-party/GPL-3.0.txt -text -whitespace
