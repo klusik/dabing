@@ -7,14 +7,15 @@ declare(strict_types=1);
  * Repository: klusik/dabing
  * File: config/mail.example.php
  * Module Type: Example configuration
- * Purpose: Document static sender configuration for invitation email.
- * Responsibilities: Provide the sender setting for protected storage/mail.php.
+ * Purpose: Show optional sender and SMTP overrides for invitation email.
+ * Responsibilities: Document settings for protected storage/mail.php when needed.
  * Author: Rudolf Klusal
  * License: All rights reserved
  */
 
 return [
-    // The public base URL is derived from the validated browser-visible request.
+    // This file is optional; without it PHP's configured mail transport is used.
+    // Set a domain sender to improve deliverability on hosting providers.
     'from' => 'noreply@example.com',
 
     // Optional Windows-only local Mailpit relay; Linux/WEDOS uses PHP mail().

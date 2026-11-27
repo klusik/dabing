@@ -169,16 +169,22 @@ pro velikost archivu.
 
 ## Pošta pro pozvánky
 
-Zkopírujte `config/mail.example.php` do neveřejného `storage/mail.php`.
-Nastavte `from` na adresu odesílatele na vaší doméně. Dabing sestaví odkaz
-z ověřené veřejné adresy aktuálního požadavku. Interní cesta přepsaná Apachem
-nemění podadresář v odkazu. Na WEDOSu používá PHP `mail()` s odesílatelem pro
-návratovou cestu. [Nastavení pošty WEDOS](https://kb.vedos.cz/maily-blokovani/)
+E-mailové pozvánky i oznámení o přiřazení postav používají standardní PHP
+`mail()`. Soubor `storage/mail.php` je volitelný. Pokud chybí, serverový
+transport PHP zvolí odesílatele i návratovou cestu. WEDOS uvádí výchozí poštovní
+server hostingu a pro lepší doručitelnost doporučuje odesílatele na vaší doméně.
+[Nastavení pošty WEDOS](https://kb.vedos.cz/maily-blokovani/)
 
-V Laragonu lze použít Mailpit. Volitelné klíče `smtp_host` a `smtp_port`
-nastavují přímé SMTP v PHP na Windows. Je-li nastavený `sendmail_path`, Dabing
-použije nakonfigurovaný příkaz a kontroluje jeho návratový kód. Výchozí místní
-Mailpit přijímá poštu na portu 1025 a zobrazuje ji na portu 8025.
+Pokud chcete nastavit vlastního odesílatele, zkopírujte
+`config/mail.example.php` do neveřejného `storage/mail.php` a změňte `from` na
+adresu vaší domény. Dabing sestaví odkaz z ověřené veřejné adresy aktuálního
+požadavku. Interní cesta přepsaná Apachem nemění podadresář v odkazu.
+
+V Laragonu lze použít Mailpit. Pokud máte `storage/mail.php`, volitelné klíče
+`smtp_host` a `smtp_port` nastavují přímé SMTP v PHP na Windows. Je-li nastavený
+`sendmail_path`, Dabing použije nakonfigurovaný příkaz a kontroluje jeho
+návratový kód. Výchozí místní Mailpit přijímá poštu na portu 1025 a zobrazuje
+ji na portu 8025.
 
 ## Aktualizace
 
@@ -205,16 +211,16 @@ v tomto požadavku a připojí se ke stejnému serveru a databázi.
 Z ověřené revize sestavte balík mimo pracovní kopii.
 
 ```sh
-php scripts/build-update.php 0.2.0 ../dabing-0.2.0.zip
+php scripts/build-update.php 0.2.1 ../dabing-0.2.1.zip
 ```
 
-Balík `dabing-0.2.0.zip` patří jako asset ke stabilnímu vydání s přesným tagem
-`0.2.0` v `klusik/dabing`. Updater přijímá také značku `v` před verzí.
+Balík `dabing-0.2.1.zip` patří jako asset ke stabilnímu vydání s přesným tagem
+`0.2.1` v `klusik/dabing`. Updater přijímá také značku `v` před verzí.
 Příkazy po schválení vydání:
 
 ```sh
-git tag 0.2.0
-git push origin refs/tags/0.2.0
+git tag 0.2.1
+git push origin refs/tags/0.2.1
 ```
 Verze balíku musí odpovídat tagu a GitHub musí k assetu uvádět kontrolní součet
 SHA-256. Archiv má jediný kořen
