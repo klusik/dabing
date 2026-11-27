@@ -339,6 +339,40 @@ final class StudioController
     }
 
     /**
+     * Delete an owner-authorized or self-created take and return to its page.
+     *
+     * @return void No value is returned.
+     */
+    public function deleteTake(): void
+    {
+        if (Http::method() !== 'POST') {
+            throw new HttpError(405, 'Metoda není podporována.');
+        }
+        Http::requireCsrf();
+        $projectId = Http::queryId('id');
+        $lineId = Http::postId('line_id');
+        $recordingId = Http::postId('recording_id');
+        $page = Http::postId('page') ?? 1;
+        if ($projectId === null || $lineId === null || $recordingId === null) {
+            Http::notice('error', 'Chybí kniha, replika nebo pokus.');
+            Http::redirect('projects');
+        }
+        try {
+            $this->service->deleteTake(
+                $projectId,
+                $lineId,
+                $recordingId,
+                $this->userId()
+            );
+        } catch (FormError $error) {
+            Http::notice('error', $error->getMessage());
+            Http::redirect('project', ['id' => $projectId, 'page' => $page]);
+        }
+        Http::notice('success', 'Pokus byl odstraněn.');
+        Http::redirect('project', ['id' => $projectId, 'page' => $page]);
+    }
+
+    /**
      * Stream authorized private audio with HEAD and single byte-range support.
      *
      * @return void

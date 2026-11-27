@@ -98,6 +98,18 @@ pro první repliku názvy `o_pejskovi_0001_001.mp3` a
 `o_pejskovi_0001_002.mp3`. Jednotlivé názvy jsou uvedené u nahrávek a
 použijí se také při stažení do počítače.
 
+Autor knihy může odstranit libovolný pokus. Spolupracovník může odstranit jen
+svůj vlastní pokus, i když už má postavu přiřazenou někdo jiný. Při odstranění
+vybraného pokusu se vybere nejnižší zbývající číslo. Číslování již uložených
+pokusů zůstává. Nový pokus dostane číslo za nejvyšším dosavadním.
+
+Při mazání se soubor nejprve přesune do neveřejného adresáře
+`storage/recordings/pending`. Pokud databázová transakce skončí chybou, soubor
+tam zůstane a přihlášeným členům je dál dostupný k poslechu i opakovanému
+mazání. Po potvrzeném smazání aplikace soubor odstraní. Když se odstranění
+nezdaří, soubor zůstane v tomto adresáři a omezená údržba ho zkusí znovu při
+některém dalším úspěšném mazání. Údržba smaže jen soubor, na který už databáze
+neodkazuje.
 První záběr se použije automaticky a vlastník může vybrat jiný. Poslech
 přehraje vybrané repliky ve scénářovém pořadí a přeskočí prázdná místa.
 Při nahrávání nebo výběru místního zvuku má čtenář náhled před uložením.

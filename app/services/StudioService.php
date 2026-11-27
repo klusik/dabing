@@ -21,6 +21,12 @@ use DateTimeZone;
 final class StudioService
 {
     /**
+     * Type: int; Units: pending files; Scope: one post-delete cleanup pass;
+     * Consumers: cleanupPendingFiles(); Rationale: bounds stale-file retries.
+     */
+    private const PENDING_DELETE_CLEANUP_BATCH_SIZE = 20;
+
+    /**
      * Integer; units: seconds; scope: collaborator invitation; consumers:
      * createInvite(); rationale: invitation links expire after seven days.
      */
@@ -158,6 +164,62 @@ final class StudioService
                 $staged['mime']
             ),
         ];
+    }
+
+    /**
+     * Delete a take with recoverable private-file staging around the SQL commit.
+     *
+     * @param int $projectId Project containing the take.
+     * @param int $lineId Script line containing the take.
+     * @param int $recordingId Take selected for removal.
+     * @param int $userId Authenticated owner or take creator.
+     * @return void No value is returned.
+     * @throws FormError When the take is missing or the requester cannot delete it.
+     */
+    public function deleteTake(
+        int $projectId,
+        int $lineId,
+        int $recordingId,
+        int $userId
+    ): void {
+        $take = $this->model->beginTakeDeletion(
+            $projectId, $lineId, $recordingId, $userId
+        );
+        if ($take === null) {
+            throw new FormError('Tento pokus nelze odstranit.');
+        }
+        try {
+            if (!$this->storage->moveToPending($take['storage_key'])) {
+                throw new FormError('Soubor pokusu není dostupný k odstranění.');
+            }
+            $this->model->finishTakeDeletion($take);
+        } catch (\Throwable $exception) {
+            // Pending storage stays playable and retryable after transaction rollback.
+            $this->model->cancelTakeDeletion();
+            throw $exception;
+        }
+        try {
+            $this->storage->deletePending($take['storage_key']);
+            $this->cleanupPendingFiles();
+        } catch (\Throwable) {
+            // A committed deletion stays successful; retained pending files are retryable.
+        }
+    }
+
+    /**
+     * Retry a bounded number of stale pending-file removals after commit.
+     *
+     * @return void No value is returned.
+     */
+    private function cleanupPendingFiles(): void
+    {
+        foreach ($this->storage->pendingKeys(
+            self::PENDING_DELETE_CLEANUP_BATCH_SIZE
+        ) as $key) {
+            if (!$this->model->hasStorageKey($key)) {
+                $this->storage->deletePending($key);
+            }
+        }
     }
 
     /**

@@ -170,7 +170,7 @@ final class StudioModel
      * @param int $projectId Requested project identifier.
      * @param int $userId Authenticated viewer identifier.
      * @param int $requestedPage One-based visible script page.
-     * @return array{project:array{id:int,title:string,role:string},chapters:list<array{id:int,title:string,lines:list<array{id:int,number:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,assigned_name:?string,can_record:bool,takes:list<array{id:int,attempt_no:int,media_type:string,user_id:int,user_name:string,created_at:string,is_selected:bool}>}>}>,members:list<array{id:int,name:string,role:string}>,voices:list<array{character:string,assigned_user_id:?int,assigned_name:?string}>,playlist:list<array{recording_id:int,line_number:int,character:string,chapter_title:string,attempt_no:int,media_type:string}>,pagination:array{page:int,pages:int,total:int}}|null
+     * @return array{project:array{id:int,title:string,role:string},chapters:list<array{id:int,title:string,lines:list<array{id:int,number:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,assigned_name:?string,can_record:bool,takes:list<array{id:int,attempt_no:int,media_type:string,user_id:int,user_name:string,created_at:string,is_selected:bool,can_delete:bool}>}>}>,members:list<array{id:int,name:string,role:string}>,voices:list<array{character:string,assigned_user_id:?int,assigned_name:?string}>,playlist:list<array{recording_id:int,line_number:int,character:string,chapter_title:string,attempt_no:int,media_type:string}>,pagination:array{page:int,pages:int,total:int}}|null
      *     Ordered page and playback data, or null when access is not allowed.
      */
     public function projectView(
@@ -293,6 +293,8 @@ final class StudioModel
                     'created_at' => (string) $row['created_at'],
                     'is_selected' => (int) $row['recording_id']
                         === (int) ($row['selected_recording_id'] ?? 0),
+                    'can_delete' => $project['role'] === 'owner'
+                        || (int) $row['recording_user_id'] === $userId,
                 ];
             }
         }
@@ -761,6 +763,137 @@ final class StudioModel
             }
             throw $exception;
         }
+    }
+
+    /**
+     * Lock a take and validate the requester before private-file staging.
+     *
+     * @param int $projectId Project containing the take.
+     * @param int $lineId Script line containing the take.
+     * @param int $recordingId Take selected for removal.
+     * @param int $userId Authenticated owner or member.
+     * @return array{line_id:int,recording_id:int,storage_key:string,selected_recording_id:?int}|null Locked row metadata, or null when unauthorized.
+     * @throws FormError When the caller is a member but lacks delete rights.
+     */
+    public function beginTakeDeletion(
+        int $projectId,
+        int $lineId,
+        int $recordingId,
+        int $userId
+    ): ?array {
+        $this->database->beginTransaction();
+        try {
+            $query = $this->database->prepare(
+                'SELECT p.owner_user_id, r.user_id, r.storage_key,
+                        l.selected_recording_id
+                 FROM dabing_projects p
+                 JOIN dabing_project_members m ON m.project_id = p.id
+                 JOIN dabing_project_chapters c ON c.project_id = p.id
+                 JOIN dabing_script_lines l ON l.chapter_id = c.id
+                 JOIN dabing_recordings r ON r.line_id = l.id
+                 WHERE p.id = ? AND l.id = ? AND r.id = ? AND m.user_id = ?
+                 FOR UPDATE'
+            );
+            $query->execute([$projectId, $lineId, $recordingId, $userId]);
+            $row = $query->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($row)) {
+                $this->database->rollBack();
+                return null;
+            }
+            if ((int) $row['owner_user_id'] !== $userId
+                && (int) $row['user_id'] !== $userId) {
+                $this->database->rollBack();
+                throw new FormError('Tento pokus nemůžete odstranit.');
+            }
+            return [
+                'line_id' => $lineId,
+                'recording_id' => $recordingId,
+                'storage_key' => (string) $row['storage_key'],
+                'selected_recording_id' => $row['selected_recording_id'] === null
+                    ? null : (int) $row['selected_recording_id'],
+            ];
+        } catch (\Throwable $exception) {
+            if ($this->database->inTransaction()) {
+                $this->database->rollBack();
+            }
+            throw $exception;
+        }
+    }
+
+    /**
+     * Delete the locked take, repairing the active selection before commit.
+     *
+     * @param array{line_id:int,recording_id:int,storage_key:string,selected_recording_id:?int} $take Context returned by beginTakeDeletion().
+     * @return void No value is returned.
+     * @throws \RuntimeException When the locked database state cannot be updated.
+     */
+    public function finishTakeDeletion(array $take): void
+    {
+        if (!$this->database->inTransaction()) {
+            throw new \RuntimeException('Take deletion transaction is not active.');
+        }
+        try {
+            if ($take['selected_recording_id'] === $take['recording_id']) {
+                $replacement = $this->database->prepare(
+                    'SELECT id FROM dabing_recordings
+                     WHERE line_id = ? AND id <> ? ORDER BY attempt_no, id LIMIT 1'
+                );
+                $replacement->execute([$take['line_id'], $take['recording_id']]);
+                $nextId = $replacement->fetchColumn();
+                $selection = $this->database->prepare(
+                    'UPDATE dabing_script_lines SET selected_recording_id = ?
+                     WHERE id = ?'
+                );
+                $selection->execute([
+                    $nextId === false ? null : (int) $nextId,
+                    $take['line_id'],
+                ]);
+                if ($selection->rowCount() !== 1) {
+                    throw new \RuntimeException('Take selection could not be updated.');
+                }
+            }
+            $delete = $this->database->prepare(
+                'DELETE FROM dabing_recordings
+                 WHERE id = ? AND line_id = ?'
+            );
+            $delete->execute([$take['recording_id'], $take['line_id']]);
+            if ($delete->rowCount() !== 1) {
+                throw new \RuntimeException('Locked take could not be deleted.');
+            }
+            $this->database->commit();
+        } catch (\Throwable $exception) {
+            if ($this->database->inTransaction()) {
+                $this->database->rollBack();
+            }
+            throw $exception;
+        }
+    }
+
+    /**
+     * Roll back an unfinished take deletion transaction.
+     *
+     * @return void No value is returned.
+     */
+    public function cancelTakeDeletion(): void
+    {
+        if ($this->database->inTransaction()) {
+            $this->database->rollBack();
+        }
+    }
+
+    /**
+     * Check whether any recording row still references a private storage key.
+     *
+     * @param string $storageKey Validated random storage key.
+     * @return bool True when a persisted take still uses the key.
+     */
+    public function hasStorageKey(string $storageKey): bool
+    {
+        $query = $this->database->prepare(
+            'SELECT 1 FROM dabing_recordings WHERE storage_key = ? LIMIT 1'
+        );
+        $query->execute([$storageKey]);
+        return $query->fetchColumn() !== false;
     }
 
     /**

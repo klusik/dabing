@@ -177,7 +177,90 @@ final class RecordingStorage
     }
 
     /**
-     * Open an authorized recording for streaming.
+     * Move an existing take into its deterministic private pending-delete path.
+     *
+     * @param string $key Random database storage key.
+     * @return bool True when staged or absent; false for conflicting paths.
+     */
+    public function moveToPending(string $key): bool
+    {
+        if (preg_match('/\A[a-f0-9]{64}\z/D', $key) !== 1) {
+            return false;
+        }
+        $source = $this->path($key);
+        $pending = $this->pendingPath($key);
+        $sourceExists = file_exists($source) || is_link($source);
+        $pendingExists = file_exists($pending) || is_link($pending);
+        if (($sourceExists && (!is_file($source) || is_link($source)))
+            || ($pendingExists && (!is_file($pending) || is_link($pending)))
+            || ($sourceExists && $pendingExists)) {
+            return false;
+        }
+        if ($pendingExists || !$sourceExists) {
+            return true;
+        }
+        $directory = dirname($pending);
+        if (!is_dir($directory) && !mkdir($directory, 0700, true)
+            && !is_dir($directory)) {
+            return false;
+        }
+        if (!rename($source, $pending)) {
+            return false;
+        }
+        chmod($pending, 0600);
+        return true;
+    }
+
+
+    /**
+     * Remove a pending take file after its recording row is gone.
+     *
+     * @param string $key Random database storage key.
+     * @return bool True when absent or successfully removed.
+     */
+    public function deletePending(string $key): bool
+    {
+        if (preg_match('/\A[a-f0-9]{64}\z/D', $key) !== 1) {
+            return false;
+        }
+        $path = $this->pendingPath($key);
+        if (!file_exists($path) && !is_link($path)) {
+            return true;
+        }
+        return !is_link($path) && is_file($path) && unlink($path);
+    }
+
+    /**
+     * Read up to a bounded batch of valid pending-delete storage keys.
+     *
+     * @param int $limit Maximum number of keys to return.
+     * @return list<string> Pending storage keys in directory iteration order.
+     */
+    public function pendingKeys(int $limit): array
+    {
+        $keys = [];
+        if ($limit < 1) {
+            return $keys;
+        }
+        $directory = dirname($this->pendingPath(str_repeat('0', 64)));
+        if (!is_dir($directory)) {
+            return $keys;
+        }
+        $entries = new \DirectoryIterator($directory);
+        foreach ($entries as $entry) {
+            if ($entry->isFile() && !$entry->isLink()
+                && preg_match('/\A[a-f0-9]{64}\z/D', $entry->getFilename()) === 1) {
+                $keys[] = $entry->getFilename();
+                if (count($keys) >= $limit) {
+                    break;
+                }
+            }
+        }
+        return $keys;
+    }
+
+    /**
+     * Open an authorized recording for streaming, including rollback recovery.
      *
      * @param string $key Random database storage key.
      * @return resource|false Open binary handle or false when unavailable.
@@ -187,7 +270,24 @@ final class RecordingStorage
         if (preg_match('/\A[a-f0-9]{64}\z/D', $key) !== 1) {
             return false;
         }
-        return fopen($this->path($key), 'rb');
+        $stream = @fopen($this->path($key), 'rb');
+        if (is_resource($stream)) {
+            return $stream;
+        }
+        return @fopen($this->pendingPath($key), 'rb');
+    }
+
+    /**
+     * Resolve a validated key beneath the pending-delete directory.
+     *
+     * @param string $key Validated random key.
+     * @return string Absolute private pending path.
+     */
+    private function pendingPath(string $key): string
+    {
+        return rtrim($this->storageDirectory, DIRECTORY_SEPARATOR)
+            . DIRECTORY_SEPARATOR . 'recordings' . DIRECTORY_SEPARATOR
+            . 'pending' . DIRECTORY_SEPARATOR . $key;
     }
 
     /**

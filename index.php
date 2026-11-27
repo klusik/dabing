@@ -52,7 +52,7 @@ $routes = [
     'join' => ['GET', 'POST'],
     'email-invite' => ['POST'], 'email-join' => ['GET', 'POST'],
     'select-take' => ['POST'], 'upload' => ['POST'],
-    'audio' => ['GET', 'HEAD'],
+    'delete-take' => ['POST'], 'audio' => ['GET', 'HEAD'],
 ];
 $route = Http::query('route');
 $route = $route === '' ? 'projects' : $route;
@@ -161,6 +161,9 @@ try {
             break;
         case 'upload':
             $studio->upload();
+            break;
+        case 'delete-take':
+            $studio->deleteTake();
             break;
         case 'audio':
             $studio->audio();
