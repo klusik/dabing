@@ -1,0 +1,13 @@
+/storage/*
+!/storage/.htaccess
+/.env
+/.env.*
+/config.php
+/.claude/
+/.codex/
+/.agent/
+/.agent-local/
+/.local/
+/node_modules/
+/vendor/
+*.log
