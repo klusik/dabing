@@ -37,11 +37,13 @@ jobs:
       DABING_DB_NAME: dabing_test
       DABING_DB_USER: dabing_ci
       DABING_DB_PASSWORD: dabing_ci_password
+      DABING_DB_ROOT_PASSWORD: dabing_ci_root
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Confirm runtime tools
         run: |
           php --version
