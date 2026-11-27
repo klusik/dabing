@@ -1,0 +1,9 @@
+Options -Indexes
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(?:$|index\.php|public/assets/[A-Za-z0-9_-]+\.(?:css|js|json|svg|png|webp|ico))$ - [L,NC]
+    RewriteRule ^ - [F,L]
+</IfModule>
+<IfModule !mod_rewrite.c>
+    Require all denied
+</IfModule>

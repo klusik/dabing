@@ -1,0 +1,41 @@
+{
+  "version": 2,
+  "title": "O pejskovi a kočičce",
+  "chapters": [
+    {
+      "title": "Jak spolu hospodařili",
+      "lines": [
+        {
+          "number": 1,
+          "character": "Vypravěč",
+          "text": "Byla jednou jedna chaloupka a v ní bydleli pejsek s kočičkou. Společně se starali o domácnost a každý den si rozdělili práci."
+        },
+        {
+          "number": 2,
+          "character": "Pejsek",
+          "text": "Dnes upečeme dort. Já přinesu mouku a ty připravíš mísu."
+        },
+        {
+          "number": 3,
+          "character": "Kočička",
+          "text": "Dobře, ale každý přidá jen jednu dobrou surovinu, aby se nám dort povedl."
+        }
+      ]
+    },
+    {
+      "title": "Návštěva",
+      "lines": [
+        {
+          "number": 4,
+          "character": "Vypravěč",
+          "text": "Když byl dort hotový, položili ho na stůl a zavolali sousedy. Každý dostal veliký kousek."
+        },
+        {
+          "number": 5,
+          "character": "Pejsek",
+          "text": "Příště upečeme ještě větší dort, abychom měli dost pro všechny."
+        }
+      ]
+    }
+  ]
+}

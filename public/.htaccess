@@ -1,0 +1,4 @@
+Options -Indexes
+<FilesMatch "^(?![A-Za-z0-9_-]+\.(?i:css|js|json|svg|png|webp|ico)$).+">
+    Require all denied
+</FilesMatch>
