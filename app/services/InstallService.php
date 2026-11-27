@@ -297,14 +297,17 @@ final class InstallService
             'password' => (string) $runtime['password'],
         ]];
         if (array_key_exists('base_url', $config)) {
-            if (!is_string($config['base_url']) || $config['base_url'] === '') {
+            if (!is_string($config['base_url'])) {
                 return null;
             }
-            $baseUrl = Http::normalizePublicBaseUrl($config['base_url']);
-            if ($baseUrl === null || $baseUrl !== $config['base_url']) {
-                return null;
+            $baseUrlInput = trim($config['base_url']);
+            if ($baseUrlInput !== '') {
+                $baseUrl = Http::normalizePublicBaseUrl($baseUrlInput);
+                if ($baseUrl === null) {
+                    return null;
+                }
+                $validated['base_url'] = $baseUrl;
             }
-            $validated['base_url'] = $baseUrl;
         }
         return $validated;
     }
