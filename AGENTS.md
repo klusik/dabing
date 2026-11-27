@@ -1,5 +1,19 @@
 # Pravidla repozitáře Dabing
 
+## Autorská pravidla (přečti před úpravou)
+
+Před zápisem ověř rozsah a větev, najdi vlastníka odpovědnosti a přečti
+příslušné pokyny. Nové nebo významně změněné odpovědnosti dodržují tok
+`Controller -> Service -> Model`, přičemž Controller samostatně připravuje data
+pro View. Podrobný povinný kontrakt je v
+[docs/AGENT_AUTHORING.md](docs/AGENT_AUTHORING.md). Tato pravidla doplňují
+bezpečnost, autorizaci, schéma a vizuální smlouvy v tomto souboru.
+
+Při změně chování aktualizuj současně typy, dokumentaci deklarací, komentáře
+číselných politik a trvalé provozní či kompatibilitní záznamy. Zachovej důvody
+existujících fallbacků i oprávnění. Nikdy nesnižuj kontrolu, limit ani typ kvůli
+snazšímu ověření.
+
 ## Git a ověření
 
 - `main` je stabilní větev, `develop` je integrační větev. Novou práci zakládej

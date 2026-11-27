@@ -114,6 +114,116 @@ function auditSources(array $files): void
     ));
 }
 
+/** Exercise native PHP mail() against an isolated sendmail capture command.
+ * @return void No return value.
+ */
+function auditMailTransport(): void
+{
+    if (PHP_OS_FAMILY === 'Windows') {
+        fwrite(STDOUT,
+            "SKIP native mail capture: Windows PHP uses a different mail transport.\n"
+        );
+        return;
+    }
+
+    $directory = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
+        . DIRECTORY_SEPARATOR . 'dabing-mail-audit-' . bin2hex(random_bytes(8));
+    if (!mkdir($directory, 0700)) {
+        throw new RuntimeException('Mail audit directory could not be created.');
+    }
+    $capturePath = $directory . DIRECTORY_SEPARATOR . 'messages.txt';
+    $captureCommand = $directory . DIRECTORY_SEPARATOR . 'capture.sh';
+    try {
+        $captureScript = "#!/bin/sh\n"
+            . 'printf "\\n--DABING-ARGS-- %s\\n" "$*" >> '
+            . escapeshellarg($capturePath) . "\n"
+            . 'cat >> ' . escapeshellarg($capturePath) . "\n"
+            . 'printf "\\n--DABING-END--\\n" >> '
+            . escapeshellarg($capturePath) . "\n";
+        if (file_put_contents($captureCommand, $captureScript) === false) {
+            throw new RuntimeException('Mail capture command could not be written.');
+        }
+        chmod($captureCommand, 0700);
+
+        $root = dirname(__DIR__);
+        $childCode = 'require ' . var_export($root . '/app/FormError.php', true) . ';'
+            . 'require ' . var_export($root . '/app/Http.php', true) . ';'
+            . 'require ' . var_export($root . '/app/services/InviteMailer.php', true) . ';'
+            . '$_SERVER["HTTP_HOST"] = "dabing.test";'
+            . '$_SERVER["REQUEST_URI"] = "/studio/index.php";'
+            . '$storage = ' . var_export($directory, true) . ';'
+            . 'if (file_exists($storage . "/mail.php")) { exit(21); }'
+            . '$mailer = new \\Dabing\\InviteMailer($storage);'
+            . 'if (!$mailer->sendInvite("invite@dabing.test",'
+            . '"0123456789abcdef0123456789abcdef", ["Rook"],'
+            . '"28. 11. 2026 12:00 Europe/Prague")) { exit(22); }'
+            . 'if (!$mailer->sendRoleAssignmentNotice("voice@dabing.test",'
+            . '73, "Test book", ["Rook", "Guard"])) { exit(23); }';
+        $sendmailPath = '/bin/sh ' . escapeshellarg($captureCommand);
+        $result = runCommand([
+            PHP_BINARY,
+            '-d',
+            'sendmail_path=' . $sendmailPath,
+            '-r',
+            $childCode,
+        ]);
+        if ($result['status'] !== 0) {
+            throw new RuntimeException('Native mail capture subprocess failed.');
+        }
+        $capture = file_get_contents($capturePath);
+        if (!is_string($capture)) {
+            throw new RuntimeException('Native mail capture was not created.');
+        }
+        $matchCount = preg_match_all(
+            '/--DABING-ARGS-- ([^\r\n]*)\r?\n(.*?)\r?\n--DABING-END--/s',
+            $capture,
+            $matches,
+            PREG_SET_ORDER
+        );
+        if ($matchCount !== 2) {
+            throw new RuntimeException('Native mail capture did not contain two messages.');
+        }
+        $messages = [];
+        foreach ($matches as $match) {
+            $arguments = (string) $match[1];
+            $rawMessage = (string) $match[2];
+            if (preg_match('/(?:\A|\s)-f(?:\s|\z)/', $arguments) === 1
+                || preg_match('/^From:/mi', $rawMessage) === 1) {
+                throw new RuntimeException(
+                    'Mail fallback supplied an unconfigured sender override.'
+                );
+            }
+            $messages[] = quoted_printable_decode($rawMessage);
+        }
+        if (!str_contains($messages[0], 'invite@dabing.test')
+            || !str_contains($messages[0], 'route=email-join')
+            || !str_contains($messages[0], '0123456789abcdef0123456789abcdef')
+            || !str_contains($messages[0], 'multipart/alternative')
+            || !str_contains($messages[1], 'voice@dabing.test')
+            || !str_contains($messages[1], 'route=project&id=73')
+            || !str_contains($messages[1], 'Rook')
+            || !str_contains($messages[1], 'Guard')
+            || !str_contains($messages[1], 'multipart/alternative')) {
+            throw new RuntimeException(
+                'Captured invitation or book-role message content was incorrect.'
+            );
+        }
+        fwrite(STDOUT,
+            "PASS native mail fallback: invitation and book-role MIME messages "
+            . "captured without configured From overrides.\n"
+        );
+    } finally {
+        foreach ([$capturePath, $captureCommand] as $path) {
+            if (is_file($path) && !is_link($path)) {
+                unlink($path);
+            }
+        }
+        if (is_dir($directory) && !is_link($directory)) {
+            rmdir($directory);
+        }
+    }
+}
+
 /** Upgrade the published 0.1.1 schema in an isolated disposable database.
  * @param string $host MariaDB service hostname.
  * @param int $port MariaDB service port.
@@ -427,6 +537,7 @@ function auditSchema(): void
 try {
     $files = trackedFiles();
     auditSources($files);
+    auditMailTransport();
     auditSchema();
 } catch (Throwable $error) {
     fail('Audit could not complete (' . get_class($error) . ').');

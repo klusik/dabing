@@ -11,13 +11,13 @@ use Throwable;
  * Repository: klusik/dabing
  * File: app/services/InviteMailer.php
  * Module Type: Service
- * Purpose: Send addressed Dabing invitation mail as Czech multipart content.
- * Responsibilities: Validate static mail config and build same-origin public links.
+ * Purpose: Send addressed invites and role notices as Czech multipart mail.
+ * Responsibilities: Apply optional mail overrides and build same-origin links.
  * Author: Rudolf Klusal
  * License: All rights reserved
  */
 
-/** Sends no email until an owner explicitly requests an invitation. */
+/** Sends mail only for an explicit invitation or role assignment action. */
 final class InviteMailer
 {
     private readonly string $configPath;
@@ -78,8 +78,7 @@ final class InviteMailer
             . "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
             . quoted_printable_encode($html) . "\r\n--{$boundary}--\r\n";
         $encodedSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
-        $headers = 'From: ' . $config['from'] . "\r\nMIME-Version: 1.0\r\n"
-            . 'Content-Type: multipart/alternative; boundary="' . $boundary . '"';
+        $headers = $this->messageHeaders($boundary, $config['from']);
         return $this->sendComposed($recipient, $encodedSubject, $body, $headers, $config);
     }
 
@@ -130,8 +129,7 @@ final class InviteMailer
             . "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
             . quoted_printable_encode($html) . "\r\n--{$boundary}--\r\n";
         $subject = '=?UTF-8?B?' . base64_encode('Nové přiřazení postav v Dabingu') . '?=';
-        $headers = 'From: ' . $config['from'] . "\r\nMIME-Version: 1.0\r\n"
-            . 'Content-Type: multipart/alternative; boundary="' . $boundary . '"';
+        $headers = $this->messageHeaders($boundary, $config['from']);
         return $this->sendComposed($recipient, $subject, $body, $headers, $config);
     }
 
@@ -140,7 +138,7 @@ final class InviteMailer
      * @param string $subject Encoded subject.
      * @param string $body Complete multipart body.
      * @param string $headers Safe sender and MIME headers.
-     * @param array{from:string,smtp_host:?string,smtp_port:?int} $config Validated mail settings.
+     * @param array{from:?string,smtp_host:?string,smtp_port:?int} $config Validated mail settings.
      * @return bool True when transport accepts the message.
      */
     private function sendComposed(
@@ -162,7 +160,10 @@ final class InviteMailer
                 $sendmailPath, $recipient, $subject, $body, $headers
             );
         }
-        $settings = ['sendmail_from' => $config['from']];
+        $settings = [];
+        if ($config['from'] !== null) {
+            $settings['sendmail_from'] = $config['from'];
+        }
         if ($config['smtp_host'] !== null && $config['smtp_port'] !== null) {
             $settings['SMTP'] = $config['smtp_host'];
             $settings['smtp_port'] = (string) $config['smtp_port'];
@@ -251,12 +252,24 @@ final class InviteMailer
         }
     }
 
+    /** Build common MIME headers and include From only when explicitly configured.
+     * @param string $boundary Random multipart message boundary.
+     * @param string|null $sender Validated configured sender or null for PHP defaults.
+     * @return string Safe MIME headers.
+     */
+    private function messageHeaders(string $boundary, ?string $sender): string
+    {
+        $headers = $sender === null ? '' : 'From: ' . $sender . "\r\n";
+        return $headers . "MIME-Version: 1.0\r\n"
+            . 'Content-Type: multipart/alternative; boundary="' . $boundary . '"';
+    }
+
     /** Convert transport warnings into safe failures handled by invitation policy.
      * @param string $recipient Validated recipient address.
      * @param string $subject Encoded message subject.
      * @param string $body Multipart message body.
      * @param string $headers MIME and sender headers.
-     * @param string $sender Validated sender address.
+     * @param string|null $sender Validated override sender, or null to use PHP defaults.
      * @return bool True when PHP mail accepts the message.
      */
     private function sendTransport(
@@ -264,7 +277,7 @@ final class InviteMailer
         string $subject,
         string $body,
         string $headers,
-        string $sender
+        ?string $sender
     ): bool {
         set_error_handler(static function (
             int $severity,
@@ -278,6 +291,9 @@ final class InviteMailer
         });
         try {
             if (PHP_OS_FAMILY === 'Windows') {
+                return mail($recipient, $subject, $body, $headers);
+            }
+            if ($sender === null) {
                 return mail($recipient, $subject, $body, $headers);
             }
             return mail($recipient, $subject, $body, $headers, '-f ' . $sender);
@@ -336,13 +352,20 @@ final class InviteMailer
     }
 
     /** Read static sender settings from protected storage.
-     * @return array{from:string,smtp_host:?string,smtp_port:?int} Valid sender settings.
-     * @throws FormError When mail setup is missing or invalid.
+     * @return array{from:?string,smtp_host:?string,smtp_port:?int} Valid settings or PHP defaults.
+     * @throws FormError When an existing mail configuration is invalid.
      */
     private function mailConfig(): array
     {
+        if (!file_exists($this->configPath)) {
+            if (is_link($this->configPath)) {
+                throw new FormError('Poštovní nastavení není platné.');
+            }
+            // PHP/server transport is canonical when no explicit override exists.
+            return ['from' => null, 'smtp_host' => null, 'smtp_port' => null];
+        }
         if (!is_file($this->configPath)) {
-            throw new FormError('E-mailové pozvánky zatím nejsou nakonfigurované.');
+            throw new FormError('Poštovní nastavení není platné.');
         }
         try {
             $config = require $this->configPath;
