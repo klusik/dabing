@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "title": "Cesta domů",
+  "chapters": [
+    {
+      "title": "První kapitola",
+      "lines": [
+        {"character": "Vypravěč", "text": "Když se setmělo, ozvalo se za dveřmi tiché zaklepání."},
+        {"character": "Anna", "text": "Slyšel jsi to také?"},
+        {"character": "Marek", "text": "Ano. Zůstanu tady, zatímco se podíváš."}
+      ]
+    }
+  ]
+}
