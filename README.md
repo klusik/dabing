@@ -110,12 +110,17 @@ mazání. Po potvrzeném smazání aplikace soubor odstraní. Když se odstraně
 nezdaří, soubor zůstane v tomto adresáři a omezená údržba ho zkusí znovu při
 některém dalším úspěšném mazání. Údržba smaže jen soubor, na který už databáze
 neodkazuje.
+
 První záběr se použije automaticky a vlastník může vybrat jiný. Poslech
 přehraje vybrané repliky ve scénářovém pořadí a přeskočí prázdná místa.
-Při nahrávání nebo výběru místního zvuku má čtenář náhled před uložením.
-Nové záznamy aplikace převádí na MP3 přímo v prohlížeči. Záznam nebo převod
-pro jeden pokus má limit tří minut. Zdroj a licence jsou v dokumentaci
-enkodéru. [lamejs](docs/third-party/lamejs-notice.md)
+Při nahrávání bliká REC a ukazatel reaguje na úroveň mikrofonu. Po stisknutí
+Stop se záznam v prohlížeči rovnou převede na MP3 a uloží. Stejně se zpracuje
+vybraný zvukový soubor. Po chybě zůstane zvuk v otevřené kartě pro další
+pokus o uložení. Pokud server při prvním požadavku uložil záběr, opakování
+vrátí tentýž záběr.
+
+Záznam nebo převod pro jeden pokus má limit tří minut. Zdroj a licence jsou
+v dokumentaci enkodéru. [lamejs](docs/third-party/lamejs-notice.md)
 
 Heslo se mění v nastavení účtu po zadání současného hesla. Po úspěšné
 změně zůstane aktuální relace přihlášená. Ostatní relace stejného účtu

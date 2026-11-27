@@ -179,12 +179,15 @@ final class StudioController
             Http::json(['ok' => false, 'message' => 'Chybí kniha, replika nebo nahrávka.'], 422);
             return;
         }
+        $tokenValue = Http::post('take_token');
+        $takeToken = $tokenValue === '' ? null : $tokenValue;
         try {
             $result = $this->service->addTake(
                 $projectId,
                 $lineId,
                 $this->userId(),
-                $file
+                $file,
+                $takeToken
             );
         } catch (FormError $error) {
             Http::json(['ok' => false, 'message' => $error->getMessage()], 422);
@@ -192,9 +195,11 @@ final class StudioController
         }
         Http::json([
             'ok' => true,
-            'message' => 'Nový pokus byl uložen.',
+            'message' => $result['reused']
+                ? 'Pokus už byl uložen.' : 'Nový pokus byl uložen.',
             'recording_id' => $result['recording_id'],
             'attempt_no' => $result['attempt_no'],
+            'reused' => $result['reused'],
             'file_name' => $result['file_name'],
             'audio_url' => Http::url('audio', ['id' => $result['recording_id']]),
             'download_url' => Http::url('audio', [

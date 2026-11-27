@@ -82,7 +82,7 @@ $playlist = is_array($data['playlist'] ?? null) ? $data['playlist'] : [];
                 <div class="chapter-heading"><span class="chapter-index">Kapitola</span><h2 id="chapter-<?= Http::escape((string) $chapter['id']) ?>"><?= Http::escape((string) $chapter['title']) ?></h2><span class="chapter-rule"></span></div>
                 <div class="line-list">
                     <?php foreach ($chapter['lines'] as $line): ?>
-                        <article class="line-card" data-line-card data-line-id="<?= Http::escape((string) $line['id']) ?>">
+                        <article class="line-card" id="line-<?= Http::escape((string) $line['id']) ?>" data-line-card data-line-id="<?= Http::escape((string) $line['id']) ?>">
                             <div class="line-identity"><span class="line-number"><?= sprintf('%04d', (int) ($line['number'] ?? $line['position'])) ?></span><span class="character-name"><?= Http::escape((string) $line['character']) ?></span><?php if (!empty($line['assigned_name'])): ?><span class="assigned-name" title="Přiřazeno: <?= Http::escape((string) $line['assigned_name']) ?>"><?= Http::escape((string) $line['assigned_name']) ?></span><?php endif; ?></div>
                             <p class="line-text"><?= Http::escape((string) $line['text']) ?></p>
                             <div class="take-list">
@@ -98,7 +98,7 @@ $playlist = is_array($data['playlist'] ?? null) ? $data['playlist'] : [];
                                             'download' => 1,
                                         ]));
                                     ?>
-                                    <div class="take-row<?= !empty($take['is_selected']) ? ' take-selected' : '' ?>">
+                                    <div class="take-row<?= !empty($take['is_selected']) ? ' take-selected' : '' ?><?= !empty($take['can_delete']) ? ' take-row-has-delete' : '' ?>">
                                         <div class="take-meta">
                                             <span class="attempt-badge" title="Číslo pokusu"><?= sprintf('%03d', $attemptNo) ?></span>
                                             <?php if ($fileName !== ''): ?><code class="take-filename"><?= Http::escape($fileName) ?></code><?php endif; ?>
@@ -106,6 +106,23 @@ $playlist = is_array($data['playlist'] ?? null) ? $data['playlist'] : [];
                                         </div>
                                         <audio preload="none" controls src="<?= Http::escape($audioUrl) ?>" aria-label="Přehrát pokus <?= sprintf('%03d', $attemptNo) ?> od <?= Http::escape((string) $take['user_name']) ?>"></audio>
                                         <a class="icon-control take-download" href="<?= Http::escape($downloadUrl) ?>"<?= $fileName !== '' ? ' download="' . Http::escape($fileName) . '"' : '' ?> title="Stáhnout <?= Http::escape($fileName !== '' ? $fileName : 'nahrávku') ?>" aria-label="Stáhnout <?= Http::escape($fileName !== '' ? $fileName : 'nahrávku') ?>"><span aria-hidden="true">↓</span></a>
+                                        <?php if (!empty($take['can_delete'])): ?>
+                                            <?php $deletePanelId = 'delete-take-' . (int) $take['id']; ?>
+                                            <div class="anchored-control take-delete-control">
+                                                        <button class="icon-control take-delete-trigger" type="button" data-panel-trigger="<?= Http::escape($deletePanelId) ?>" title="Smazat pokus <?= sprintf('%03d', $attemptNo) ?>" aria-label="Smazat pokus <?= sprintf('%03d', $attemptNo) ?>" aria-expanded="false" aria-controls="<?= Http::escape($deletePanelId) ?>"><span class="trash-icon" aria-hidden="true"></span></button>
+                                                <div class="popover take-delete-panel" id="<?= Http::escape($deletePanelId) ?>" data-panel hidden>
+                                                    <h2>Smazat nahrávku?</h2>
+                                                    <form method="post" action="<?= Http::escape(Http::url('delete-take', ['id' => (string) $project['id']])) ?>" class="delete-take-form">
+                                                        <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
+                                                        <input type="hidden" name="line_id" value="<?= Http::escape((string) $line['id']) ?>">
+                                                        <input type="hidden" name="recording_id" value="<?= Http::escape((string) $take['id']) ?>">
+                                                        <input type="hidden" name="page" value="<?= Http::escape((string) ($pagination['page'] ?? 1)) ?>">
+                                                        <button class="icon-control delete-confirm" type="submit" title="Potvrdit smazání" aria-label="Potvrdit smazání"><span class="trash-icon" aria-hidden="true"></span><span>Smazat</span></button>
+                                                        <button class="icon-control" type="button" data-panel-close title="Zrušit mazání" aria-label="Zrušit mazání"><span aria-hidden="true">×</span></button>
+                                                    </form>
+                                                </div>
+                                            </div>
+                                        <?php endif; ?>
                                         <?php if (empty($take['is_selected']) && ($project['role'] ?? '') === 'owner'): ?>
                                             <form method="post" action="<?= Http::escape(Http::url('select-take', ['id' => (string) $project['id']])) ?>" class="inline-form">
                                                 <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
@@ -119,9 +136,9 @@ $playlist = is_array($data['playlist'] ?? null) ? $data['playlist'] : [];
                             </div>
                             <?php if (($line['can_record'] ?? true) === true): ?>
                                 <div class="record-controls" data-recorder><input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
-                                    <div class="record-actions"><button type="button" class="icon-control record-button" data-record-start aria-describedby="recording-help" title="Nahrát repliku; mikrofon povolíte až po kliknutí" aria-label="Nahrát repliku <?= sprintf('%04d', (int) ($line['number'] ?? $line['position'])) ?>"><span class="record-dot" aria-hidden="true"></span></button><button type="button" class="icon-control record-button record-stop" data-record-stop title="Ukončit nahrávání" aria-label="Ukončit nahrávání" hidden><span class="stop-square" aria-hidden="true"></span></button><label class="icon-control file-pick" title="Vybrat zvukový soubor"><span aria-hidden="true">↥</span><span class="sr-only">Vybrat zvukový soubor</span><input type="file" accept="audio/*" data-audio-file aria-label="Vybrat zvukový soubor" aria-describedby="recording-help"></label></div>
+                                    <div class="record-actions"><button type="button" class="icon-control record-button" data-record-start aria-describedby="recording-help" title="Nahrát repliku; mikrofon povolíte až po kliknutí" aria-label="Nahrát repliku <?= sprintf('%04d', (int) ($line['number'] ?? $line['position'])) ?>"><span class="record-dot" aria-hidden="true"></span></button><button type="button" class="icon-control record-button record-stop" data-record-stop title="Ukončit nahrávání" aria-label="Ukončit nahrávání" hidden><span class="stop-square" aria-hidden="true"></span></button><label class="icon-control file-pick" title="Vybrat zvukový soubor"><span aria-hidden="true">↥</span><span class="sr-only">Vybrat zvukový soubor</span><input type="file" accept="audio/*" data-audio-file aria-label="Vybrat zvukový soubor" aria-describedby="recording-help"></label><span class="record-live" data-record-live hidden><span class="record-live-label" aria-hidden="true">REC</span><span class="record-meter" data-record-meter role="meter" aria-label="Úroveň mikrofonu" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60" aria-valuetext="-60 dBFS"><span data-record-meter-fill></span></span><span class="record-db" data-record-db aria-hidden="true">−60 dBFS</span></span></div>
                                     <p class="record-status" data-record-status aria-live="polite"></p>
-                                    <div class="record-preview" data-record-preview hidden></div>
+                                    <div class="record-retry-area" data-record-retry-area hidden></div>
                                 </div>
                             <?php else: ?>
                                 <p class="record-unavailable" title="Tato replika je přiřazena jinému členu.">Přiřazeno: <?= Http::escape((string) ($line['assigned_name'] ?? '')) ?></p>

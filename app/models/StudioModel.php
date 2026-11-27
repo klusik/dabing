@@ -672,7 +672,8 @@ final class StudioModel
      * @param string $storageKey Random non-executable relative storage key.
      * @param string $mediaType Verified audio MIME type.
      * @param int $byteSize Verified upload size.
-     * @return array{storage_key:string,recording_id:int,attempt_no:int,line_number:int,project_title:string} Persisted take and naming data.
+     * @param string|null $idempotencyPrefix Optional scoped storage-key lookup prefix.
+     * @return array{storage_key:string,recording_id:int,attempt_no:int,line_number:int,project_title:string,media_type:string,reused:bool} Persisted or previously saved take data.
      * @throws FormError When access is denied or the attempt cap is exhausted.
      */
     public function addRecording(
@@ -681,7 +682,8 @@ final class StudioModel
         int $userId,
         string $storageKey,
         string $mediaType,
-        int $byteSize
+        int $byteSize,
+        ?string $idempotencyPrefix = null
     ): array {
         $this->database->beginTransaction();
         try {
@@ -719,13 +721,41 @@ final class StudioModel
                 && (int) $line['assigned_user_id'] !== $userId) {
                 throw new FormError('Tato postava je přiřazena jinému hlasu.');
             }
+            if ($idempotencyPrefix !== null) {
+                $existingQuery = $this->database->prepare(
+                    'SELECT id, attempt_no, storage_key, media_type
+                     FROM dabing_recordings
+                     WHERE line_id = ? AND user_id = ? AND storage_key LIKE ?
+                     LIMIT 1 FOR UPDATE'
+                );
+                $existingQuery->execute([
+                    $lineId,
+                    $userId,
+                    $idempotencyPrefix . '%',
+                ]);
+                $existing = $existingQuery->fetch(PDO::FETCH_ASSOC);
+                if (is_array($existing)) {
+                    $this->database->commit();
+                    return [
+                        'storage_key' => (string) $existing['storage_key'],
+                        'recording_id' => (int) $existing['id'],
+                        'attempt_no' => (int) $existing['attempt_no'],
+                        'line_number' => (int) $line['line_number'],
+                        'project_title' => (string) $line['title'],
+                        'media_type' => (string) $existing['media_type'],
+                        'reused' => true,
+                    ];
+                }
+            }
 
             $lastAttempt = $this->database->prepare(
-                'SELECT COALESCE(MAX(attempt_no), 0)
-                 FROM dabing_recordings WHERE line_id = ?'
+                'SELECT attempt_no FROM dabing_recordings
+                 WHERE line_id = ? ORDER BY attempt_no DESC, id DESC
+                 LIMIT 1 FOR UPDATE'
             );
             $lastAttempt->execute([$lineId]);
-            $attemptNo = (int) $lastAttempt->fetchColumn() + 1;
+            $lastValue = $lastAttempt->fetchColumn();
+            $attemptNo = ($lastValue === false ? 0 : (int) $lastValue) + 1;
             if ($attemptNo > TakeNaming::MAX_ATTEMPTS) {
                 throw new FormError('Tato replika už má maximální počet pokusů.');
             }
@@ -756,6 +786,8 @@ final class StudioModel
                 'attempt_no' => $attemptNo,
                 'line_number' => (int) $line['line_number'],
                 'project_title' => (string) $line['title'],
+                'media_type' => $mediaType,
+                'reused' => false,
             ];
         } catch (\Throwable $exception) {
             if ($this->database->inTransaction()) {

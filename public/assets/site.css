@@ -193,10 +193,19 @@ input:focus, textarea:focus { border-color: var(--forest); outline: 3px solid rg
 .file-pick input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .file-pick:focus-within { outline: 3px solid rgba(183,122,53,.6); outline-offset: 3px; }
 .record-status { margin: 8px 0 0; color: #858c84; font-size: 11px; }
-.record-preview { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-top: 10px; }
-.record-preview audio { width: min(250px, 100%); height: 38px; }
-.upload-button { min-height: 38px; border: 0; border-radius: 9px; padding: 0 13px; background: var(--forest); color: white; font-size: 11px; font-weight: 700; cursor: pointer; }
+.record-retry-area { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.record-retry-area[hidden] { display: none; }
+.upload-discard { min-height: 44px; border: 1px solid var(--line); border-radius: 9px; padding: 0 12px; background: rgba(255,255,255,.7); color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; }
+.upload-button { min-height: 44px; display: inline-flex; align-items: center; gap: 7px; border: 0; border-radius: 9px; padding: 0 13px; background: var(--forest); color: white; font-size: 12px; font-weight: 700; cursor: pointer; }
 .upload-button:disabled { opacity: .65; cursor: progress; }
+.record-live { display: inline-flex; min-height: 42px; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid rgba(164,71,58,.2); border-radius: 10px; background: rgba(255,237,230,.56); color: #a4473a; }
+.record-live[hidden] { display: none; }
+.record-live-label { font: 800 10px/1 ui-monospace, Consolas, monospace; letter-spacing: .08em; animation: record-blink 1s steps(2, start) infinite; }
+.record-meter { display: block; width: 78px; height: 7px; overflow: hidden; border-radius: 999px; background: rgba(164,71,58,.14); }
+.record-meter > span { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--coral); transition: width 70ms linear; }
+.record-meter-unavailable > span { width: 0 !important; }
+.record-db { min-width: 49px; color: #784a42; font: 10px/1 ui-monospace, Consolas, monospace; text-align: right; }
+@keyframes record-blink { to { opacity: .35; } }
 .playlist-card { position: sticky; top: 20px; padding: 22px; border: 1px solid rgba(255,255,255,.78); border-radius: 18px; background: rgba(255,255,255,.57); box-shadow: 0 12px 38px rgba(43,50,42,.06); }
 .playlist-top { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
 .playlist-icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; background: var(--lime); color: var(--forest); font-size: 18px; }
@@ -251,8 +260,7 @@ input:focus, textarea:focus { border-color: var(--forest); outline: 3px solid rg
     .take-byline { min-width: 42%; }
     .record-actions { gap: 7px; }
     .record-button, .file-pick { min-height: 44px; flex: 1; padding: 0 9px; }
-    .record-preview { align-items: stretch; flex-direction: column; }
-    .record-preview audio { width: 100%; }
+    .record-retry-area { align-items: flex-start; }
     .playlist-items { grid-template-columns: 1fr; }
     .member-count { font-size: 10px; }
     .field-grid { grid-template-columns: 1fr; }
@@ -326,6 +334,7 @@ input:focus, textarea:focus { border-color: var(--forest); outline: 3px solid rg
 .create-card textarea { min-height: 125px; }
 .file-hint:empty { display: none; }
 .take-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px 10px; }
+.take-row-has-delete { grid-template-columns: minmax(0, 1fr) auto auto auto; }
 .take-meta { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 5px 8px; }
 .attempt-badge { display: inline-grid; place-items: center; min-width: 36px; height: 23px; border-radius: 7px; background: rgba(49,93,75,.09); color: var(--forest-deep); font: 700 10px ui-monospace, Consolas, monospace; }
 .take-filename { max-width: 100%; overflow-wrap: anywhere; color: #455149; font: 10px ui-monospace, Consolas, monospace; }
@@ -334,6 +343,16 @@ input:focus, textarea:focus { border-color: var(--forest); outline: 3px solid rg
 .take-download, .take-select { width: 40px; min-width: 40px; height: 40px; flex-basis: 40px; }
 .take-row form { grid-column: 3; grid-row: 1; }
 .take-download { grid-column: 2; grid-row: 1; }
+.take-delete-control { grid-column: 4; grid-row: 1; flex: 0 0 auto; }
+.take-delete-trigger { color: #8c4036; }
+.take-delete-panel { top: calc(100% + 7px); right: 0; width: 220px; padding: 12px; }
+.take-delete-panel h2 { margin: 0 0 9px; font-size: 14px; }
+.delete-take-form { display: flex; gap: 7px; margin: 0; }
+.delete-confirm { width: auto; min-width: 100px; flex: 1 1 auto; display: inline-flex; gap: 7px; background: #8c4036; color: #fff; font-size: 12px; }
+.delete-confirm:hover { border-color: #8c4036; background: #79352d; color: #fff; }
+.trash-icon { position: relative; display: inline-block; width: 12px; height: 13px; margin-top: 3px; border: 1.5px solid currentColor; border-top: 0; border-radius: 0 0 2px 2px; }
+.trash-icon::before { position: absolute; top: -4px; left: -3px; width: 16px; height: 1.5px; background: currentColor; content: ""; }
+.trash-icon::after { position: absolute; top: -6px; left: 3px; width: 5px; height: 2px; border: 1px solid currentColor; border-bottom: 0; border-radius: 2px 2px 0 0; content: ""; }
 .record-actions { gap: 7px; }
 .record-button { position: relative; }
 .record-button.is-recording .record-dot { animation: pulse 1.3s ease-in-out infinite; }
@@ -357,11 +376,14 @@ input:focus, textarea:focus { border-color: var(--forest); outline: 3px solid rg
     .json-example { max-height: 250px; font-size: 10px; }
     .guidance-ai pre { max-height: 200px; }
     .take-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+    .take-row-has-delete { grid-template-columns: minmax(0, 1fr) auto auto auto; }
     .take-row audio { grid-column: 1 / -1; width: 100%; }
     .take-meta { grid-column: 1 / -1; }
     .take-download { grid-column: 2; grid-row: 2; }
     .take-row form { grid-column: 3; grid-row: 2; }
+    .take-delete-control { grid-column: 4; grid-row: 2; }
     .take-byline { flex: 0 0 auto; }
+    .take-delete-panel { right: 0; width: min(220px, calc(100vw - 42px)); }
 }
 .auth-submit { align-self: end; margin-top: 4px; background: var(--forest); color: #fff; }
 @media (max-width: 680px) {

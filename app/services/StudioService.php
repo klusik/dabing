@@ -32,6 +32,7 @@ final class StudioService
      */
     private const INVITE_TTL_SECONDS = 604800;
 
+
     /**
      * Create the studio service dependencies.
      *
@@ -128,19 +129,41 @@ final class StudioService
      * @param int $lineId Requested script line.
      * @param int $userId Authenticated recorder.
      * @param array{name:string,type:string,tmp_name:string,error:int,size:int} $file PHP upload metadata.
-     * @return array{recording_id:int,attempt_no:int,file_name:string} Saved take metadata.
-     * @throws FormError When file, project access, or attempt capacity is invalid.
+     * @param string|null $takeToken Optional stable client token for safe retries.
+     * @return array{recording_id:int,attempt_no:int,file_name:string,reused:bool} Saved or replayed take metadata.
+     * @throws FormError When the token, file, or take authorization is invalid.
      */
     public function addTake(
         int $projectId,
         int $lineId,
         int $userId,
-        array $file
+        array $file,
+        ?string $takeToken = null
     ): array {
+        $idempotencyPrefix = null;
+        if ($takeToken !== null) {
+            if (strlen($takeToken) !== RecordingStorage::IDEMPOTENCY_PREFIX_HEX_CHARS
+                || preg_match('/\A[a-f0-9]+\z/D', $takeToken) !== 1) {
+                throw new FormError('Identifikátor nahrávky je neplatný.');
+            }
+            $digest = hash('sha256', implode("\0", [
+                'dabing:take-token:v1',
+                (string) $projectId,
+                (string) $lineId,
+                (string) $userId,
+                $takeToken,
+            ]));
+            $idempotencyPrefix = substr(
+                $digest,
+                0,
+                RecordingStorage::IDEMPOTENCY_PREFIX_HEX_CHARS
+            );
+        }
         if (!$this->model->canRecord($projectId, $lineId, $userId)) {
             throw new FormError('Tato replika není přiřazena vašemu hlasu.');
         }
-        $staged = $this->storage->stage($file);
+        // A token replay may return an existing take after a later role change.
+        $staged = $this->storage->stage($file, $idempotencyPrefix);
         try {
             $saved = $this->model->addRecording(
                 $projectId,
@@ -148,11 +171,25 @@ final class StudioService
                 $userId,
                 $staged['key'],
                 $staged['mime'],
-                $staged['size']
+                $staged['size'],
+                $idempotencyPrefix
             );
         } catch (\Throwable $exception) {
-            $this->storage->delete($staged['key']);
+            if ($idempotencyPrefix === null) {
+                $this->storage->delete($staged['key']);
+            } else {
+                try {
+                    if (!$this->model->hasStorageKey($staged['key'])) {
+                        $this->storage->delete($staged['key']);
+                    }
+                } catch (\Throwable) {
+                    // Preserve the file if the transaction outcome is unknown.
+                }
+            }
             throw $exception;
+        }
+        if ($saved['storage_key'] !== $staged['key']) {
+            $this->storage->delete($staged['key']);
         }
         return [
             'recording_id' => $saved['recording_id'],
@@ -161,8 +198,9 @@ final class StudioService
                 $saved['project_title'],
                 $saved['line_number'],
                 $saved['attempt_no'],
-                $staged['mime']
+                $saved['media_type']
             ),
+            'reused' => $saved['reused'],
         ];
     }
 

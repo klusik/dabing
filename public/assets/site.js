@@ -32,6 +32,91 @@ const MAX_RECORDING_SECONDS = 180;
  */
 const MP3_SAMPLE_RATE = 44100;
 const MP3_WORKER_PATH = './public/assets/mp3-worker.js';
+let activeCaptureCard = null;
+let interruptedCaptureCard = null;
+let savedPageNeedsRefresh = false;
+
+/**
+ * Take-token entropy policy.
+ * Type: Integer
+ * Units: Random bytes
+ * Scope: One new audio capture or selected file
+ * Consumers: Stable upload deduplication token generation
+ * Rationale: Provide 128 bits of token entropy across explicit retries.
+ * Value: 16 bytes, rendered as 32 lowercase hexadecimal characters.
+ */
+const TAKE_TOKEN_BYTES = 16;
+
+/**
+ * Decibel conversion policy.
+ * Type: Number
+ * Units: Decibels per natural logarithm unit
+ * Scope: RMS microphone level display
+ * Consumers: dBFS conversion
+ * Rationale: Convert amplitude ratios with 20 × log10 to decibels.
+ * Value: 20.
+ */
+const AMPLITUDE_DECIBEL_FACTOR = 20;
+
+/**
+ * Meter maximum policy.
+ * Type: Number
+ * Units: Decibels relative to full scale
+ * Scope: Live microphone meter
+ * Consumers: dBFS clamping
+ * Rationale: Digital full scale is the upper measurement boundary.
+ * Value: 0 dBFS.
+ */
+const METER_MAX_DBFS = 0;
+
+/**
+ * Lock microphone and file controls to one line until save or discard.
+ * @param {?HTMLElement} card - Active line, or null to release the page lock.
+ * @param {?HTMLInputElement} exemptControl - File input opening its picker.
+ * @returns {void} Other lines cannot begin overlapping captures or uploads.
+ */
+function setCaptureOwner(card, exemptControl = null) {
+    activeCaptureCard = card;
+    document.querySelectorAll('[data-record-start], [data-audio-file]').forEach((control) => {
+        control.disabled = card !== null
+            && (!card.contains(control) || control !== exemptControl);
+    });
+}
+
+/**
+ * Create one stable deduplication token for a new captured or selected take.
+ * @returns {string} A 32-character lowercase hexadecimal token.
+ */
+function createTakeToken() {
+    if (!window.crypto?.getRandomValues) {
+        throw new Error('Zabezpečené ukládání není dostupné v tomto prohlížeči.');
+    }
+    const bytes = new Uint8Array(TAKE_TOKEN_BYTES);
+    window.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Meter floor policy.
+ * Type: Number
+ * Units: Decibels relative to full scale
+ * Scope: One live microphone meter
+ * Consumers: RMS meter floor and progress range
+ * Rationale: Keep quiet room noise visible without magnifying the display.
+ * Value: -60 dBFS.
+ */
+const METER_MIN_DBFS = -60;
+
+/**
+ * Meter analysis window policy.
+ * Type: Integer
+ * Units: Samples
+ * Scope: One live microphone meter
+ * Consumers: Analyser FFT window and sample buffer
+ * Rationale: Provide a responsive level reading with modest CPU use.
+ * Value: 1024 samples.
+ */
+const METER_FFT_SIZE = 1024;
 
 /**
  * MIME preference for browsers that expose a supported recorder format.
@@ -59,6 +144,12 @@ function bindPanel(trigger, panel) {
         panel.hidden = true;
         trigger.setAttribute('aria-expanded', 'false');
     };
+    panel.querySelectorAll('[data-panel-close]').forEach((button) => {
+        button.addEventListener('click', () => {
+            close();
+            trigger.focus();
+        });
+    });
     trigger.addEventListener('click', (event) => {
         event.stopPropagation();
         const willOpen = panel.hidden;
@@ -85,36 +176,98 @@ function bindPanel(trigger, panel) {
 }
 
 /**
- * Create a playable local preview and explicit upload control for a chosen clip.
- * @param {HTMLElement} preview - The line card's preview container.
- * @param {Blob} blob - Audio data selected by the reader or captured by the browser.
- * @param {string} fileName - A safe filename to send to the upload endpoint.
- * @param {HTMLElement} card - The line card containing the upload controls.
- * @param {HTMLElement} status - The accessible status paragraph for this line.
- * @returns {void} The preview is shown and can be uploaded after user confirmation.
+ * Preserve a failed recording and offer an explicit retry without playback UI.
+ * @param {HTMLElement} retryArea - The line's compact failure-action container.
+ * @param {HTMLElement} card - The line card containing the recording token.
+ * @param {{blob: Blob, token: string, mp3: ?Blob, saved: boolean, discarded: boolean}} pending - Retained take data.
+ * @param {HTMLElement} status - Accessible conversion and upload status.
+ * @param {() => void} onDiscard - Releases the retained blob and page capture lock.
+ * @returns {void} A visible retry action is attached to the line.
  */
-function showRecordingPreview(preview, blob, card, status) {
-    preview.querySelectorAll('audio[src^="blob:"]').forEach((player) => URL.revokeObjectURL(player.src));
-    preview.replaceChildren();
-    const player = document.createElement('audio');
-    const objectUrl = URL.createObjectURL(blob);
-    player.controls = true;
-    player.preload = 'metadata';
-    player.src = objectUrl;
-    player.setAttribute('aria-label', 'Náhled vybrané nahrávky');
-    const upload = document.createElement('button');
-    upload.type = 'button';
-    upload.className = 'icon-control upload-button';
-    upload.title = 'Převést a nahrát jako MP3';
-    upload.setAttribute('aria-label', 'Převést a nahrát nahrávku jako MP3');
-    upload.textContent = '↑';
-    upload.addEventListener('click', () => {
-        uploadRecording(card, blob, status, upload);
-    });
-    preview.append(player, upload);
-    preview.hidden = false;
-    status.textContent = 'Náhled připraven. Při odeslání se převede na MP3.';
-    player.addEventListener('emptied', () => URL.revokeObjectURL(objectUrl), { once: true });
+function showRetryAction(retryArea, card, pending, status, onDiscard) {
+    retryArea.replaceChildren();
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'upload-button';
+    retry.title = 'Zkusit uložit znovu';
+    retry.setAttribute('aria-label', 'Zkusit uložit nahrávku znovu');
+    retry.innerHTML = '<span aria-hidden="true">↻</span><span>Zkusit znovu</span>';
+    retry.addEventListener('click', () => uploadRecording(card, pending, status, retry));
+    const discard = document.createElement('button');
+    discard.type = 'button';
+    discard.className = 'upload-discard';
+    discard.title = 'Zahodit neuloženou nahrávku';
+    discard.setAttribute('aria-label', 'Zahodit neuloženou nahrávku');
+    discard.textContent = 'Zahodit';
+    discard.addEventListener('click', onDiscard);
+    retryArea.append(retry, discard);
+    retryArea.hidden = false;
+}
+
+/**
+ * Start a non-monitoring RMS meter for an already granted microphone stream.
+ * @param {MediaStream} stream - The stream already used by MediaRecorder.
+ * @param {HTMLElement} live - REC indicator shown during recording.
+ * @param {HTMLElement} meter - Accessible dBFS meter element.
+ * @param {HTMLElement} fill - Visual meter fill bar.
+ * @param {HTMLElement} levelText - Visible numeric level text.
+ * @returns {() => void} Stops animation and closes the analyser context.
+ */
+function startRecordingMeter(stream, live, meter, fill, levelText) {
+    live.hidden = false;
+    meter.classList.remove('record-meter-unavailable');
+    let context = null;
+    let source = null;
+    let analyser = null;
+    let frameId = 0;
+    let closed = false;
+    try {
+        const AudioContextType = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextType) throw new Error('AudioContext unavailable');
+        context = new AudioContextType();
+        context.resume().catch(() => {});
+        source = context.createMediaStreamSource(stream);
+        analyser = context.createAnalyser();
+        analyser.fftSize = METER_FFT_SIZE;
+        source.connect(analyser);
+        const samples = new Float32Array(analyser.fftSize);
+        const update = () => {
+            if (closed || !analyser) return;
+            analyser.getFloatTimeDomainData(samples);
+            let squaredSum = 0;
+            for (const sample of samples) squaredSum += sample * sample;
+            const rms = Math.sqrt(squaredSum / samples.length);
+            const dbfs = rms > 0
+                ? AMPLITUDE_DECIBEL_FACTOR * Math.log10(rms)
+                : METER_MIN_DBFS;
+            const clampedDbfs = Math.max(
+                METER_MIN_DBFS,
+                Math.min(METER_MAX_DBFS, dbfs)
+            );
+            const fraction = (clampedDbfs - METER_MIN_DBFS) / -METER_MIN_DBFS;
+            fill.style.width = `${fraction * 100}%`;
+            meter.setAttribute('aria-valuenow', String(Math.round(clampedDbfs)));
+            meter.setAttribute('aria-valuetext', String(Math.round(clampedDbfs)) + ' dBFS');
+            levelText.textContent = `${Math.round(clampedDbfs)} dBFS`;
+            frameId = window.requestAnimationFrame(update);
+        };
+        frameId = window.requestAnimationFrame(update);
+    } catch (error) {
+        meter.classList.add('record-meter-unavailable');
+        meter.setAttribute('aria-valuenow', String(METER_MIN_DBFS));
+        levelText.textContent = '— dBFS';
+    }
+    return () => {
+        if (closed) return;
+        closed = true;
+        if (frameId) window.cancelAnimationFrame(frameId);
+        if (source) source.disconnect();
+        if (analyser) analyser.disconnect();
+        live.hidden = true;
+        if (context && context.state !== 'closed') {
+            context.close().catch(() => {});
+        }
+    };
 }
 
 /**
@@ -159,7 +312,7 @@ function encodeMp3WithWorker(samples) {
 
 /**
  * Decode any supported source, downmix and resample it, then encode genuine MP3.
- * @param {Blob} source - Original preview recording or selected audio file.
+ * @param {Blob} source - Captured audio or a selected source audio file.
  * @returns {Promise<Blob>} A mono 44.1 kHz MP3 blob ready for upload.
  */
 async function convertToMp3(source) {
@@ -203,73 +356,133 @@ async function convertToMp3(source) {
         if (error instanceof Error && error.message.includes('180 sekund')) {
             throw error;
         }
-        throw new Error('Zvuk se nepodařilo převést na MP3. Původní náhled zůstává k dispozici.');
+        throw new Error('Zvuk se nepodařilo převést na MP3. Záznam zůstal v paměti.');
     } finally {
         if (decoder.state !== 'closed') await decoder.close();
     }
 }
 
 /**
- * Convert a confirmed preview to MP3 and upload it without discarding the source.
+ * Convert a stopped recording to MP3 and upload it without discarding the source.
  * @param {HTMLElement} card - The line card containing identifiers and CSRF token.
- * @param {Blob} blob - Original captured or selected audio, kept for retry.
- * @param {string} fileName - Original filename used only for local preview context.
+ * @param {{blob: Blob, token: string, mp3: ?Blob, saved: boolean, discarded: boolean}} pending - Take data retained for retry.
  * @param {HTMLElement} status - Accessible conversion and upload status.
- * @param {HTMLButtonElement} button - Conversion action disabled during processing.
- * @returns {Promise<void>} Resolves after the upload or reports a retryable failure.
+ * @param {?HTMLButtonElement} button - Optional retry action disabled during processing.
+ * @returns {Promise<void>} Resolves after upload or shows an explicit retry on failure.
  */
-async function uploadRecording(card, blob, status, button) {
+async function uploadRecording(card, pending, status, button) {
     const token = card.querySelector('input[name="csrf"]')?.value ?? '';
     const lineId = card.closest('[data-line-card]')?.dataset.lineId
         ?? card.dataset.lineId ?? '';
     const projectId = document.querySelector('[data-project-id]')?.dataset.projectId ?? '';
-    button.disabled = true;
-    button.setAttribute('aria-busy', 'true');
-    button.classList.add('is-busy');
+    if (activeCaptureCard && activeCaptureCard !== card) {
+        status.textContent = 'Jiná replika se právě ukládá.';
+        return;
+    }
+    setCaptureOwner(card);
+    if (button) {
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        button.classList.add('is-busy');
+    }
+    card.querySelectorAll('[data-record-retry-area] button').forEach((action) => {
+        action.disabled = true;
+    });
     status.textContent = 'Převádím zvuk na MP3…';
+    let requestSent = false;
+    let responseReceived = false;
     try {
-        const mp3 = await convertToMp3(blob);
+        const mp3 = pending.mp3 ?? await convertToMp3(pending.blob);
+        pending.mp3 = mp3;
         const form = new FormData();
         form.append('csrf', token);
         form.append('line_id', lineId);
+        pending.token = pending.token || createTakeToken();
+        form.append('take_token', pending.token);
         form.append('audio', mp3, 'dabing-take.mp3');
         status.textContent = 'Nahrávám MP3…';
+        requestSent = true;
         const response = await fetch(
             `?route=upload&id=${encodeURIComponent(projectId)}`,
             { method: 'POST', body: form, credentials: 'same-origin' }
         );
-        const result = await response.json();
+        responseReceived = true;
+        let result;
+        try {
+            result = await response.json();
+        } catch (error) {
+            throw new Error('Server vrátil neplatnou odpověď.');
+        }
         if (!response.ok || !result.ok) {
             throw new Error(result.message || 'Nahrávání se nepodařilo.');
         }
+        pending.saved = true;
+        pending.blob = new Blob([]);
+        pending.mp3 = null;
+        savedPageNeedsRefresh = true;
+        card.querySelector('[data-record-retry-area]')?.replaceChildren();
+        const retryArea = card.querySelector('[data-record-retry-area]');
+        if (retryArea) retryArea.hidden = true;
         status.textContent = result.file_name
             ? `Uloženo: ${result.file_name}`
             : (result.message || 'Nahrávka je uložena.');
-        window.setTimeout(() => window.location.reload(), 700);
+        const line = card.closest('[data-line-card]');
+        if (line?.id) {
+            window.history.replaceState(null, '', '#' + encodeURIComponent(line.id));
+        }
+        window.setTimeout(() => window.location.reload(), 500);
     } catch (error) {
-        const message = error instanceof Error
+        const rawMessage = error instanceof Error
             ? error.message
             : 'Nahrávání se nepodařilo.';
-        status.textContent = `${message} Původní náhled zůstává k dispozici; zkuste to znovu.`;
-        button.disabled = false;
+        const message = requestSent && !responseReceived && error instanceof TypeError
+            ? 'Připojení se přerušilo.'
+            : rawMessage;
+        status.textContent = requestSent && !responseReceived
+            ? `${message} Záznam zůstal v paměti; můžete bezpečně zkusit znovu.`
+            : `${message} Záznam zůstal v paměti.`;
+        showRetryAction(
+            card.querySelector('[data-record-retry-area]'),
+            card,
+            pending,
+            status,
+            () => {
+                pending.discarded = true;
+                pending.blob = new Blob([]);
+                pending.mp3 = null;
+                const retryArea = card.querySelector('[data-record-retry-area]');
+                if (retryArea) {
+                    retryArea.replaceChildren();
+                    retryArea.hidden = true;
+                }
+                status.textContent = 'Nahrávka zahozena.';
+                setCaptureOwner(null);
+            }
+        );
     } finally {
-        button.removeAttribute('aria-busy');
-        button.classList.remove('is-busy');
+        if (button) {
+            button.removeAttribute('aria-busy');
+            button.classList.remove('is-busy');
+        }
     }
 }
 
 /**
  * Bind one line's microphone and file-picker lifecycle.
  * @param {HTMLElement} card - A script line element with recorder controls.
- * @returns {void} The line gains microphone recording and file upload preview.
+ * @returns {void} The line gains serialized capture, automatic upload and retry actions.
  */
 function bindRecorder(card) {
     const start = card.querySelector('[data-record-start]');
     const stop = card.querySelector('[data-record-stop]');
     const status = card.querySelector('[data-record-status]');
-    const preview = card.querySelector('[data-record-preview]');
+    const retryArea = card.querySelector('[data-record-retry-area]');
     const fileInput = card.querySelector('[data-audio-file]');
-    if (!start || !stop || !status || !preview || !fileInput) return;
+    const live = card.querySelector('[data-record-live]');
+    const meter = card.querySelector('[data-record-meter]');
+    const meterFill = card.querySelector('[data-record-meter-fill]');
+    const meterDb = card.querySelector('[data-record-db]');
+    if (!start || !stop || !status || !retryArea || !fileInput) return;
 
     let recorder = null;
     let stream = null;
@@ -277,20 +490,23 @@ function bindRecorder(card) {
     let timer = null;
     let disposed = false;
     let permissionSequence = 0;
-    let currentName = 'dabing-replika.webm';
+    let stopMeter = () => {};
+    let discardRecording = false;
+    let pendingUpload = null;
+    let recordingInterruptedByPagehide = false;
 
     const releaseStream = () => {
         if (stream) stream.getTracks().forEach((track) => track.stop());
         stream = null;
     };
     const finishRecording = () => {
+        stopMeter();
+        stopMeter = () => {};
         const recording = recorder && recorder.state !== 'inactive';
         if (recording) {
-            start.disabled = true;
             recorder.stop();
         } else {
             releaseStream();
-            start.disabled = false;
         }
         if (timer !== null) window.clearTimeout(timer);
         timer = null;
@@ -298,13 +514,25 @@ function bindRecorder(card) {
         stop.hidden = true;
     };
     start.addEventListener('click', async () => {
+        if (activeCaptureCard && activeCaptureCard !== card) {
+            status.textContent = 'Nejdřív dokončete ukládání jiné repliky.';
+            return;
+        }
+        if (pendingUpload && !pendingUpload.saved && !pendingUpload.discarded) {
+            status.textContent = 'Nejdřív uložte čekající nahrávku.';
+            retryArea.querySelector('button')?.focus();
+            return;
+        }
+        setCaptureOwner(card);
+        pendingUpload = null;
+        discardRecording = false;
         if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
             status.textContent = 'Tento prohlížeč neumí nahrávat z mikrofonu. Použijte výběr zvukového souboru.';
+            setCaptureOwner(null);
             fileInput.focus();
             return;
         }
         const requestId = ++permissionSequence;
-        start.disabled = true;
         status.textContent = 'Čekám na povolení mikrofonu…';
         try {
             const grantedStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -313,6 +541,25 @@ function bindRecorder(card) {
                 return;
             }
             stream = grantedStream;
+            if (live && meter && meterFill && meterDb) {
+                stopMeter = startRecordingMeter(
+                    grantedStream,
+                    live,
+                    meter,
+                    meterFill,
+                    meterDb
+                );
+            }
+            grantedStream.getAudioTracks().forEach((track) => {
+                track.addEventListener('ended', () => {
+                    if (recorder && recorder.state !== 'inactive') {
+                        discardRecording = true;
+                        chunks = [];
+                        finishRecording();
+                        status.textContent = 'Mikrofon se odpojil. Nahrávka nebyla uložena.';
+                    }
+                }, { once: true });
+            });
             const supportedType = RECORDING_MIME_TYPES.find((type) =>
                 MediaRecorder.isTypeSupported(type)
             );
@@ -325,21 +572,36 @@ function bindRecorder(card) {
             });
             recorder.addEventListener('error', () => {
                 chunks = [];
+                discardRecording = true;
                 status.textContent = 'Nahrávání bylo přerušeno. Zkontrolujte mikrofon a zkuste to znovu.';
                 finishRecording();
             });
             recorder.addEventListener('stop', () => {
-            releaseStream();
+                stopMeter();
+                stopMeter = () => {};
+                if (timer !== null) window.clearTimeout(timer);
+                timer = null;
+                releaseStream();
                 if (disposed) return;
                 start.hidden = false;
-                start.disabled = false;
-                if (chunks.length === 0) return;
+                if (discardRecording) {
+                    chunks = [];
+                    discardRecording = false;
+                    setCaptureOwner(null);
+                    return;
+                }
+                if (chunks.length === 0) {
+                    setCaptureOwner(null);
+                    status.textContent = 'Nahrávka neobsahuje zvuk.';
+                    return;
+                }
                 const mimeType = recorder?.mimeType || chunks[0].type || 'audio/webm';
                 const blob = new Blob(chunks, { type: mimeType });
-                currentName = mimeType.includes('ogg')
-                    ? 'dabing-replika.ogg'
-                    : (mimeType.includes('mp4') ? 'dabing-replika.mp4' : 'dabing-replika.webm');
-                showRecordingPreview(preview, blob, card, status);
+                chunks = [];
+                pendingUpload = { blob, token: '', mp3: null, saved: false, discarded: false };
+                retryArea.hidden = true;
+                status.textContent = 'Ukládám nahrávku…';
+                uploadRecording(card, pendingUpload, status, null);
             });
             recorder.start();
             start.hidden = true;
@@ -349,10 +611,14 @@ function bindRecorder(card) {
             status.textContent = 'Nahrává se.';
             timer = window.setTimeout(() => {
                 finishRecording();
-                status.textContent = 'Limit jedné repliky vypršel. Zkontrolujte náhled a případně nahrajte repliku znovu.';
+                status.textContent = 'Limit 180 sekund. Ukládám nahrávku…';
             }, MAX_RECORDING_SECONDS * 1000);
         } catch (error) {
+            discardRecording = true;
+            stopMeter();
+            stopMeter = () => {};
             releaseStream();
+            setCaptureOwner(null);
             if (error instanceof DOMException && error.name === 'NotAllowedError') {
                 status.textContent = 'Přístup k mikrofonu není povolen. Povolte jej v prohlížeči nebo vyberte zvukový soubor.';
             } else if (error instanceof DOMException && error.name === 'NotFoundError') {
@@ -360,32 +626,69 @@ function bindRecorder(card) {
             } else {
                 status.textContent = 'Mikrofon se nepodařilo spustit. Zkuste soubor nebo opakujte pokus.';
             }
-        } finally {
-            start.disabled = false;
         }
     });
     stop.addEventListener('click', finishRecording);
+    fileInput.addEventListener('click', (event) => {
+        if (activeCaptureCard && activeCaptureCard !== card) {
+            event.preventDefault();
+            status.textContent = 'Nejdřív dokončete ukládání jiné repliky.';
+            return;
+        }
+        setCaptureOwner(card, fileInput);
+    });
+    fileInput.addEventListener('cancel', () => {
+        if (!fileInput.files?.length) setCaptureOwner(null);
+    });
     fileInput.addEventListener('change', () => {
         const file = fileInput.files?.[0];
-        if (!file) return;
+        if (!file) {
+            setCaptureOwner(null);
+            return;
+        }
+        if (pendingUpload && !pendingUpload.saved && !pendingUpload.discarded) {
+            status.textContent = 'Nejdřív uložte čekající nahrávku.';
+            fileInput.value = '';
+            retryArea.querySelector('button')?.focus();
+            return;
+        }
         if (!file.type.startsWith('audio/')) {
             status.textContent = 'Vyberte prosím zvukový soubor.';
             fileInput.value = '';
+            setCaptureOwner(null);
             return;
         }
-        currentName = file.name || 'dabing-replika';
-        showRecordingPreview(preview, file, card, status);
+        pendingUpload = { blob: file, token: '', mp3: null, saved: false, discarded: false };
+        fileInput.value = '';
+        status.textContent = 'Ukládám zvukový soubor…';
+        uploadRecording(card, pendingUpload, status, null);
     });
     window.addEventListener('pagehide', () => {
+        recordingInterruptedByPagehide = activeCaptureCard === card && !pendingUpload;
+        if (recordingInterruptedByPagehide) interruptedCaptureCard = card;
         disposed = true;
         permissionSequence += 1;
         if (recorder && recorder.state !== 'inactive') recorder.stop();
-            if (timer !== null) window.clearTimeout(timer);
+        discardRecording = true;
+        chunks = [];
+        stopMeter();
+        stopMeter = () => {};
+        if (timer !== null) window.clearTimeout(timer);
         releaseStream();
-        preview.querySelectorAll('audio').forEach((player) => {
-            if (player.src.startsWith('blob:')) URL.revokeObjectURL(player.src);
-        });
-    }, { once: true });
+    });
+    window.addEventListener('pageshow', (event) => {
+        if (!event.persisted) return;
+        disposed = false;
+        if (savedPageNeedsRefresh || !recordingInterruptedByPagehide
+            || interruptedCaptureCard !== card || activeCaptureCard !== card) return;
+        recordingInterruptedByPagehide = false;
+        interruptedCaptureCard = null;
+        start.hidden = false;
+        start.classList.remove('is-recording');
+        stop.hidden = true;
+        setCaptureOwner(null);
+        status.textContent = 'Nahrávání bylo při opuštění stránky přerušeno.';
+    });
 }
 
 /**
@@ -642,3 +945,6 @@ function bindPlaylist() {
 
 document.querySelectorAll('[data-script-form]').forEach(bindScriptImport);
 bindPlaylist();
+window.addEventListener('pageshow', (event) => {
+    if (event.persisted && savedPageNeedsRefresh) window.location.reload();
+});

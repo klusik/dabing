@@ -9,7 +9,7 @@ namespace Dabing;
  * File: app/services/RecordingStorage.php
  * Module Type: Service
  * Purpose: Safely stage and serve private audio recordings.
- * Responsibilities: Validate finite uploads, randomize keys, and stream byte ranges.
+ * Responsibilities: Validate uploads, derive retry-safe keys, manage pending deletes, and stream audio.
  * Author: Rudolf Klusal
  * License: All rights reserved.
  */
@@ -22,6 +22,18 @@ final class RecordingStorage
      * Rationale: bounds per-recording disk use at 32 MiB.
      */
     private const MAX_BYTES = 33554432;
+
+    /**
+     * Type: int; Units: hexadecimal characters; Scope: idempotent take keys;
+     * Consumers: stage(), StudioService::addTake(); Rationale: match token to key prefix.
+     */
+    public const IDEMPOTENCY_PREFIX_HEX_CHARS = 32;
+
+    /**
+     * Type: int; Units: random bytes; Scope: idempotent take key suffix;
+     * Consumers: stage(); Rationale: keep each complete storage key unpredictable.
+     */
+    private const RANDOM_SUFFIX_BYTES = 16;
 
 
 
@@ -39,10 +51,11 @@ final class RecordingStorage
      * Validate upload contents and stage under an unpredictable key.
      *
      * @param array{name:string,type:string,tmp_name:string,error:int,size:int} $file PHP upload metadata.
+     * @param string|null $keyPrefix Optional validated 32-character idempotency prefix.
      * @return array{key:string,mime:string,size:int} Safe staged-file metadata.
      * @throws FormError When upload or detected content is invalid.
      */
-    public function stage(array $file): array
+    public function stage(array $file, ?string $keyPrefix = null): array
     {
         if ($file['error'] !== UPLOAD_ERR_OK || $file['size'] < 1
             || $file['size'] > self::MAX_BYTES
@@ -62,7 +75,14 @@ final class RecordingStorage
             || !$this->hasValidMp3Frame($file['tmp_name'], $actualSize)) {
             throw new FormError('Nový pokus musí být platná nahrávka MP3.');
         }
-        $key = bin2hex(random_bytes(32));
+        if ($keyPrefix !== null
+            && (strlen($keyPrefix) !== self::IDEMPOTENCY_PREFIX_HEX_CHARS
+                || preg_match('/\A[a-f0-9]+\z/D', $keyPrefix) !== 1)) {
+            throw new FormError('Identifikátor nahrávky je neplatný.');
+        }
+        $key = $keyPrefix === null
+            ? bin2hex(random_bytes(32))
+            : $keyPrefix . bin2hex(random_bytes(self::RANDOM_SUFFIX_BYTES));
         $directory = rtrim($this->storageDirectory, DIRECTORY_SEPARATOR)
             . DIRECTORY_SEPARATOR . 'recordings';
         if (!is_dir($directory) && !mkdir($directory, 0700, true)
