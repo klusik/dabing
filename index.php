@@ -80,13 +80,6 @@ try {
     $database = $install->database();
     $auth = new AuthService($database);
     $user = $auth->currentUser();
-    if (($route === 'join' || $route === 'login' || $route === 'register')
-        && Http::query('return') === 'join') {
-        $token = Http::query('token');
-        if (preg_match('/\A[a-f0-9]{64}\z/D', $token) === 1) {
-            $_SESSION['pending_invite'] = $token;
-        }
-    }
     if ($route === 'login') {
         $account->login($auth);
         exit;

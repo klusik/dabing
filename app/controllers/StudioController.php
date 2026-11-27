@@ -33,7 +33,7 @@ final class StudioController
      *
      * @param PDO $database Shared database connection.
      * @param string $storageDirectory Absolute private storage root.
-     * @param array<string,mixed> $user Authenticated user row containing id/name.
+     * @param array{id:int,name:string,email:string,is_admin:bool} $user Authenticated account data.
      * @return void
      */
     public function __construct(

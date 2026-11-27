@@ -237,7 +237,7 @@ final class Http
     /** Render one fixed application view inside the shared layout.
      * @param string $view Fixed view key, never a path.
      * @param string $title Page title.
-     * @param array<string,mixed> $data Prepared view data.
+     * @param array{errors?:list<string>,values?:array{db_host?:string,db_port?:string,db_name?:string,db_user?:string,name?:string,email?:string},keyReady?:bool,db_host?:string,db_port?:string,db_name?:string,db_user?:string,name?:string,email?:string,projects?:list<array{id:int,title:string,role:string,created_at:string,line_count:int,recording_count:int}>,project?:array{id:int,title:string,role:string},chapters?:list<array{id:int,title:string,lines:list<array{id:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,takes:list<array{id:int,user_id:int,user_name:string,created_at:string,is_selected:bool}>}>}>,members?:list<array{id:int,name:string,role:string}>,can_invite?:bool,invite_url?:string,token?:string,valid?:bool,status?:int,message?:string} $data Prepared view data.
      * @param array{id:int,name:string,email:string,is_admin:bool}|null $user Authenticated user or null.
      * @param int $status HTTP response status.
      * @return void No return value.
@@ -298,7 +298,7 @@ final class Http
     }
 
     /** Send a structured JSON response and terminate the request.
-     * @param array<string,mixed> $payload JSON-compatible response shape.
+     * @param array{ok:bool,message:string,recording_id?:int} $payload Upload response payload.
      * @param int $status HTTP status code.
      * @return never Does not return.
      */

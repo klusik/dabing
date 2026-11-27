@@ -113,7 +113,7 @@ final class ScriptImport
                 ++$lineCount;
                 $lineLocation = $location . ', replika ' . ($lineIndex + 1);
                 if ($lineCount > self::MAX_LINES) {
-                    throw new FormError( . ': scénář překračuje limit 1000 replik.');
+                    throw new FormError($lineLocation . ': scénář překračuje limit 1000 replik.');
                 }
                 if (!($line instanceof \stdClass)) {
                     throw new FormError($lineLocation . ': očekává se objekt.');
@@ -140,7 +140,7 @@ final class ScriptImport
     /**
      * Normalize a required nonempty text field.
      *
-     * @param mixed $value Candidate decoded JSON value.
+     * @param null|bool|int|float|string|list<mixed>|\stdClass $value Candidate value decoded from JSON.
      * @param string $location Human-readable field location.
      * @param int $maximumLength Maximum accepted Unicode character count.
      * @return string Trimmed validated text.

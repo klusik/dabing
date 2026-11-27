@@ -38,10 +38,6 @@ Pro celý limit zvuku nastavte alespoň `upload_max_filesize = 32M` a
 `post_max_size = 36M`. Vyžaduje-li hosting nižší hodnotu, uplatní se tento
 nižší limit.
 
-Místní instalaci lze omezit na loopback vytvořením prázdného souboru
-`storage/local-only`. Při jeho přítomnosti aplikace přijímá požadavky na
-přihlášení a projekty pouze ze stejného počítače.
-
 ## Scénář a spolupráce
 
 Nahrajte UTF-8 JSON se strukturou verze 1. Například

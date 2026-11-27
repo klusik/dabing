@@ -100,30 +100,6 @@ final class AccountModel
         )->fetchColumn();
     }
 
-    /** Check whether this throttle key may attempt authentication.
-     * @param string $key Hashed normalized email and client address.
-     * @return bool True when not currently blocked.
-     */
-    public function mayAttempt(string $key): bool
-    {
-        $statement = $this->database->prepare(
-            'SELECT attempts, window_started_at, blocked_until '
-            . 'FROM dabing_login_attempts WHERE attempt_key = :key'
-        );
-        $statement->execute(['key' => $key]);
-        $row = $statement->fetch(PDO::FETCH_ASSOC);
-        if (!is_array($row)) {
-            return true;
-        }
-        if ($row['blocked_until'] !== null
-            && strtotime((string) $row['blocked_until']) > time()) {
-            return false;
-        }
-        return (int) $row['attempts'] < self::MAX_ATTEMPTS
-            || strtotime((string) $row['window_started_at'] . ' UTC')
-                < time() - self::WINDOW_SECONDS;
-    }
-
     /** Atomically count a throttle attempt before credential verification.
      * @param string $key Stable route and client throttle key.
      * @return bool True when the attempt remains within the configured limit.
@@ -168,50 +144,6 @@ final class AccountModel
             throw $error;
         }
     }
-    /** Record a failed attempt and apply the temporary block if needed.
-     * @param string $key Hashed normalized email and client address.
-     * @return void No return value.
-     */
-    public function recordFailure(string $key): void
-    {
-        $this->database->beginTransaction();
-        try {
-            $query = $this->database->prepare(
-                'SELECT attempts, window_started_at FROM dabing_login_attempts '
-                . 'WHERE attempt_key = :key FOR UPDATE'
-            );
-            $query->execute(['key' => $key]);
-            $row = $query->fetch(PDO::FETCH_ASSOC);
-            $now = time();
-            $expired = !is_array($row)
-                || strtotime((string) $row['window_started_at'] . ' UTC')
-                    < $now - self::WINDOW_SECONDS;
-            $attempts = $expired ? 1 : (int) $row['attempts'] + 1;
-            $started = $expired ? date('Y-m-d H:i:s', $now)
-                : (string) $row['window_started_at'];
-            $blocked = $attempts >= self::MAX_ATTEMPTS
-                ? date('Y-m-d H:i:s', $now + self::BLOCK_SECONDS) : null;
-            $write = $this->database->prepare(
-                'INSERT INTO dabing_login_attempts '
-                . '(attempt_key, attempts, window_started_at, blocked_until) '
-                . 'VALUES (:key, :attempts, :started, :blocked) '
-                . 'ON DUPLICATE KEY UPDATE attempts = VALUES(attempts), '
-                . 'window_started_at = VALUES(window_started_at), '
-                . 'blocked_until = VALUES(blocked_until)'
-            );
-            $write->execute([
-                'key' => $key,
-                'attempts' => $attempts,
-                'started' => $started,
-                'blocked' => $blocked,
-            ]);
-            $this->database->commit();
-        } catch (\Throwable $error) {
-            $this->database->rollBack();
-            throw $error;
-        }
-    }
-
     /** Clear failed attempts after successful authentication.
      * @param string $key Hashed normalized email and client address.
      * @return void No return value.
