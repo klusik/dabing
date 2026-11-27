@@ -11,31 +11,24 @@ prázdnou databázi MariaDB nebo MySQL, Apache 2.4 s `mod_rewrite` a povolené
 zpracování `.htaccess`. Pro mikrofon otevřete web přes HTTPS nebo na
 `localhost`. Aplikace zachytí zvuk v prohlížeči pomocí MediaRecorder.
 
-1. Zkopírujte zdrojové soubory včetně `.htaccess` do adresáře, který webserver
-   obsluhuje pro zvolenou veřejnou adresu. Pro zápis aplikace zpřístupněte
-   adresář `storage`. Git metadata ani dřívější provozní soubory nekopírujte.
+1. Zkopírujte zdrojové soubory včetně `.htaccess` do webového adresáře a
+   zpřístupněte aplikaci pro zápis do `storage`. Nekopírujte Git metadata ani
+   dřívější provozní soubory.
 2. Ověřte, že adresy pod `storage/` a `database/` vracejí 403 nebo 404.
-   Vygenerujte instalační klíč příkazem `php scripts/create-install-key.php`.
-   Při nasazení přes FTP vytvořte soubor `storage/install.key` s jedním řádkem
-   náhodného klíče. Můžete použít 64 náhodných hexadecimálních znaků.
-3. Otevřete veřejnou adresu Dabingu. Průvodce požádá o klíč, přístup do
-   databáze a údaje správce. Pokud účet webu smí pouze pracovat s daty,
-   vyplňte v průvodci ještě účet s právy k vytvoření tabulek.
-4. Po dokončení se přihlaste účtem správce. Provozní údaje databáze zůstávají
-   v `storage/config.php`. Pro zálohu uchovávejte databázi a neveřejný adresář
-   `storage`, zejména `storage/recordings/`.
+3. Otevřete veřejnou adresu Dabingu. Průvodce požádá o server, název
+   databáze, databázový účet a heslo, port (výchozí `3306`) a počáteční účet
+   s uživatelským jménem, e-mailem a heslem. Zadejte účet databáze, který smí
+   vytvářet tabulky.
+4. Po dokončení se přihlaste vytvořeným účtem. Přístup do databáze je uložený
+   v chráněném `storage/config.php`. Pro zálohu uchovávejte databázi a neveřejný
+   adresář `storage`, zejména `storage/recordings/`.
 
-Na WEDOSu použijte server a název databáze z administrace hostingu. Účet
-**web** patří do provozních údajů a účet **admin** poslouží k vytvoření tabulek.
-Pro nasazení na `dabing.klusik.cz` nahrajte obsah složky `dabing/` z ověřeného
-ZIP balíčku do `www/subdom/dabing`, včetně souborů `.htaccess`. V instalačním
-průvodci zadejte do pole **Veřejná adresa** `https://dabing.klusik.cz/`.
-Pro jinou doménu nebo podsložku zadejte její veřejnou adresu, například
-`https://dabing.example.cz/` nebo
-`https://example.cz/dabing/`. Aplikace nemá pevně nastavenou veřejnou adresu.
-U existující instalace lze stejnou adresu nastavit pod klíčem `base_url` v
-`storage/config.php`. Tato adresa se používá pro odkazy, styly a přesměrování.
-Při prázdné hodnotě používá aplikace relativní odkazy vyhodnocené prohlížečem.
+Na WEDOSu použijte server, název databáze a jeden databázový účet z administrace
+hostingu. Tento účet musí mít oprávnění vytvářet tabulky. Nahrajte obsah složky
+`dabing/` z ověřeného ZIP balíčku do `www/subdom/dabing`, včetně `.htaccess`,
+a otevřete `https://dabing.klusik.cz/`. Starší instalace může mít v
+`storage/config.php` nastavení `base_url`. Nová instalace používá relativní
+odkazy a veřejnou adresu nevyžaduje.
 
 - [Dokumentace databází WEDOS](https://kb.vedos.cz/webhosting-databaze/)
 - [Dokumentace konfigurace PHP WEDOS](https://kb.vedos.cz/webhosting-php/)
@@ -183,13 +176,14 @@ v tomto požadavku a připojí se ke stejnému serveru a databázi.
 Z ověřené revize sestavte balík mimo pracovní kopii.
 
 ```sh
-php scripts/build-update.php 0.1.0 ../dabing-0.1.0.zip
+php scripts/build-update.php 0.1.1 ../dabing-0.1.1.zip
 ```
 
-Balík `dabing-0.1.0.zip` patří jako asset ke stabilnímu vydání s tagem
-`0.1.0` v `klusik/dabing`. Updater přijímá i tag s předponou, například
-`v0.1.0`. Verze ve staženém balíku musí odpovídat tagu a GitHub musí k assetu
-uvádět kontrolní součet SHA-256. Archiv má jediný kořen `dabing/`.
+Balík `dabing-0.1.1.zip` patří jako asset ke stabilnímu vydání s přesným tagem
+`0.1.1` v `klusik/dabing`. Updater přijímá také značku `v` před verzí.
+Verze balíku musí odpovídat tagu a GitHub musí k assetu uvádět kontrolní součet
+SHA-256. Archiv má jediný kořen
+`dabing/`.
 Na WEDOSu nasazujte obsah složky podle umístění uvedeného výše.
 
 Migrace jsou soubory `database/migrations/0001_nazev.php`, které vracejí

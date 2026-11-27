@@ -35,23 +35,23 @@ final class AccountController
             Http::redirect('login');
         }
         $values = [
-            'db_host' => 'localhost', 'db_port' => '3306', 'db_name' => '',
-            'db_user' => '', 'base_url' => '', 'name' => '', 'email' => '',
+            'db_host' => 'localhost',
+            'db_port' => (string) InstallService::DEFAULT_DB_PORT,
+            'db_name' => '', 'db_user' => '', 'name' => '', 'email' => '',
         ];
         $errors = [];
         if (Http::method() === 'POST') {
             Http::requireCsrf();
+            $dbPort = Http::post('db_port');
+            if ($dbPort === '') {
+                $dbPort = (string) InstallService::DEFAULT_DB_PORT;
+            }
             $input = [
-                'install_key' => Http::post('install_key'),
-                'db_host' => Http::post('db_host'), 'db_port' => Http::post('db_port'),
+                'db_host' => Http::post('db_host'), 'db_port' => $dbPort,
                 'db_name' => Http::post('db_name'), 'db_user' => Http::post('db_user'),
-                'base_url' => Http::post('base_url'),
                 'db_password' => Http::post('db_password', false),
-                'setup_user' => Http::post('setup_user'),
-                'setup_password' => Http::post('setup_password', false),
                 'name' => Http::post('name'), 'email' => Http::post('email'),
                 'password' => Http::post('password', false),
-                'password_confirm' => Http::post('password_confirm', false),
             ];
             foreach ($values as $key => $_value) {
                 $values[$key] = $input[$key];
@@ -69,7 +69,6 @@ final class AccountController
         Http::render('install', 'Instalace', [
             'errors' => $errors,
             'values' => $values,
-            'keyReady' => $this->install->keyReady(),
         ]);
     }
 

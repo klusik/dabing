@@ -274,12 +274,6 @@ input:focus, textarea:focus { border-color: var(--forest); outline: 3px solid rg
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
-.setup-hint { margin: 0 0 16px; padding: 12px 14px; border: 1px solid rgba(183,122,53,.24); border-radius: 11px; background: rgba(248,235,204,.56); color: #755628; font-size: 12px; }
-.optional-setup { border-top: 1px solid var(--line); padding-top: 12px; }
-.optional-setup summary { color: var(--forest); font-size: 12px; font-weight: 700; cursor: pointer; }
-.optional-setup p { margin: 7px 0 0; color: var(--muted); font-size: 11px; }
-.optional-setup .field-grid { margin-top: 13px; }
-
 .form-error { margin: 0; padding: 10px 12px; border-radius: 9px; background: rgba(220,114,94,.12); color: #8c4036; font-size: 12px; }
 .form-hint, .file-hint { margin: -7px 0 0; color: var(--muted); font-size: 11px; }
 .json-file-label { display: grid; gap: 7px; color: #49514b; font-size: 12px; font-weight: 700; }
