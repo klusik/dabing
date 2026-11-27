@@ -423,8 +423,8 @@ final class Http
         self::redirect('projects');
     }
 
-    /** Send a structured JSON response and terminate the request.
-     * @param array{ok:bool,message:string,recording_id?:int,attempt_no?:int,file_name?:string,audio_url?:string,download_url?:string} $payload Upload response payload.
+    /** Send a structured upload or role-assignment response and terminate the request.
+     * @param array{ok:bool,message:string,recording_id?:int,attempt_no?:int,file_name?:string,audio_url?:string,download_url?:string,assigned?:bool} $payload Upload or assignment response payload.
      * @param int $status HTTP status code.
      * @return never Does not return.
      */

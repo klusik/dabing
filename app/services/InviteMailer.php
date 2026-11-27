@@ -80,8 +80,78 @@ final class InviteMailer
         $encodedSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
         $headers = 'From: ' . $config['from'] . "\r\nMIME-Version: 1.0\r\n"
             . 'Content-Type: multipart/alternative; boundary="' . $boundary . '"';
+        return $this->sendComposed($recipient, $encodedSubject, $body, $headers, $config);
+    }
+
+    /** Send an informational message after an existing account receives roles.
+     * @param string $recipient Existing account email address.
+     * @param int $projectId Target book identifier.
+     * @param string $projectTitle Book title from the grant transaction.
+     * @param list<string> $roles Newly assigned exact roles.
+     * @return bool True when the configured transport accepts the message.
+     * @throws FormError When recipient, book, roles, or mail configuration is invalid.
+     */
+    public function sendRoleAssignmentNotice(
+        string $recipient,
+        int $projectId,
+        string $projectTitle,
+        array $roles
+    ): bool {
+        if (filter_var($recipient, FILTER_VALIDATE_EMAIL) === false
+            || $projectId < 1 || $roles === []) {
+            throw new FormError('Informační e-mail o přiřazení nelze odeslat.');
+        }
+        $config = $this->mailConfig();
+        $baseUrl = $this->requestPublicBase();
+        $link = rtrim($baseUrl, '/') . '/' . Http::routeQuery(
+            'project', ['id' => $projectId]
+        );
+        $safeTitle = htmlspecialchars(
+            $projectTitle, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'
+        );
+        $roleText = 'Přiřazené postavy: ' . implode(', ', $roles);
+        $plain = "Dobrý den,\r\n\r\nByly vám přiřazeny nové postavy v knize „"
+            . $projectTitle . "“: " . implode(', ', $roles)
+            . "\r\n\r\nOtevřít knihu: {$link}\r\n";
+        $boundary = 'dabing_' . bin2hex(random_bytes(16));
+        $htmlLink = htmlspecialchars($link, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $html = '<!doctype html><html lang="cs"><head><meta charset="utf-8">'
+            . '<title>Přiřazení postav v Dabingu</title></head><body>'
+            . '<p>Dobrý den,</p><p>Byly vám přiřazeny nové postavy v knize „'
+            . $safeTitle . '“.</p><p>' . htmlspecialchars(
+                $roleText, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'
+            ) . '</p><p><a href="' . $htmlLink . '" style="display:inline-block;'
+            . 'padding:12px 20px;background:#26344a;color:#fff;text-decoration:none;'
+            . 'border-radius:8px">Otevřít knihu</a></p></body></html>';
+        $body = '--' . $boundary . "\r\nContent-Type: text/plain; charset=UTF-8\r\n"
+            . "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
+            . quoted_printable_encode($plain) . "\r\n--{$boundary}\r\n"
+            . "Content-Type: text/html; charset=UTF-8\r\n"
+            . "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
+            . quoted_printable_encode($html) . "\r\n--{$boundary}--\r\n";
+        $subject = '=?UTF-8?B?' . base64_encode('Nové přiřazení postav v Dabingu') . '?=';
+        $headers = 'From: ' . $config['from'] . "\r\nMIME-Version: 1.0\r\n"
+            . 'Content-Type: multipart/alternative; boundary="' . $boundary . '"';
+        return $this->sendComposed($recipient, $subject, $body, $headers, $config);
+    }
+
+    /** Deliver a composed message through the configured platform transport.
+     * @param string $recipient Validated recipient address.
+     * @param string $subject Encoded subject.
+     * @param string $body Complete multipart body.
+     * @param string $headers Safe sender and MIME headers.
+     * @param array{from:string,smtp_host:?string,smtp_port:?int} $config Validated mail settings.
+     * @return bool True when transport accepts the message.
+     */
+    private function sendComposed(
+        string $recipient,
+        string $subject,
+        string $body,
+        string $headers,
+        array $config
+    ): bool {
         $send = fn (): bool => $this->sendTransport(
-            $recipient, $encodedSubject, $body, $headers, $config['from']
+            $recipient, $subject, $body, $headers, $config['from']
         );
         if (PHP_OS_FAMILY !== 'Windows') {
             return $send();
@@ -89,11 +159,7 @@ final class InviteMailer
         $sendmailPath = ini_get('sendmail_path');
         if (is_string($sendmailPath) && trim($sendmailPath) !== '') {
             return $this->sendWithConfiguredSendmail(
-                $sendmailPath,
-                $recipient,
-                $encodedSubject,
-                $body,
-                $headers
+                $sendmailPath, $recipient, $subject, $body, $headers
             );
         }
         $settings = ['sendmail_from' => $config['from']];

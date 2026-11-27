@@ -105,8 +105,49 @@ final class UserAdminService
             $character,
             $assigned
         )) {
-            throw new FormError('Účet je neaktivní nebo kniha se změnila.');
+            throw new FormError('Účet nebo kniha již neexistuje nebo se změnila.');
         }
+    }
+
+    /** Add selected book roles to an existing account without removing grants.
+     * @param int $actorId Current administrator identifier.
+     * @param int $userId Existing target account identifier.
+     * @param int $projectId Existing book identifier.
+     * @param list<string> $roles Nonempty exact script roles to grant.
+     * @return array{email:string,project_title:string,roles:list<string>} Target and newly inserted roles for informational mail.
+     * @throws FormError When no roles are selected or a role/account/book is invalid.
+     * @throws HttpError When the actor is not an active administrator.
+     */
+    public function grantRoles(
+        int $actorId,
+        int $userId,
+        int $projectId,
+        array $roles
+    ): array {
+        if ($roles === []) {
+            throw new FormError('Vyberte alespoň jednu postavu.');
+        }
+        $available = [];
+        foreach ($this->studio->projectRoles($projectId) as $role) {
+            $available[bin2hex($role)] = $role;
+        }
+        $requested = [];
+        foreach ($roles as $role) {
+            if (!is_string($role) || !isset($available[bin2hex($role)])) {
+                throw new FormError('Vyberte pouze postavy z této knihy.');
+            }
+            $requested[bin2hex($role)] = $available[bin2hex($role)];
+        }
+        $result = $this->users->grantRoles(
+            $actorId,
+            $userId,
+            $projectId,
+            array_values($requested)
+        );
+        if ($result === null) {
+            throw new FormError('Účet nebo kniha již neexistuje.');
+        }
+        return $result;
     }
 
     /** Deactivate or reactivate a target account.

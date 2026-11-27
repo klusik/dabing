@@ -39,30 +39,47 @@ $filter = (string) ($data['filter'] ?? 'all');
                 <button class="icon-control" type="button" data-panel-trigger="cast-panel" title="Přiřadit hlasy" aria-label="Přiřadit hlasy" aria-expanded="<?= Http::query('cast') === '1' ? 'true' : 'false' ?>" aria-controls="cast-panel"><span aria-hidden="true">♬</span></button>
                 <div class="popover cast-popover" id="cast-panel" data-panel<?= Http::query('cast') === '1' ? '' : ' hidden' ?>>
                     <h2>Obsazení</h2>
-                    <?php foreach ($voices as $voice): ?>
-                        <section class="cast-role">
-                            <h3><?= Http::escape((string) $voice['character']) ?></h3>
-                            <div class="cast-choices">
-                                <?php foreach (($data['role_users'] ?? []) as $roleUser): ?>
-                                    <?php $isAssigned = in_array((int) $roleUser['id'], $voice['assigned_users'] ?? [], true); ?>
-                                    <?php if ($isAssigned || !empty($roleUser['is_active'])): ?>
-                                    <form method="post" action="<?= Http::escape(Http::url('assign-voice', ['id' => (string) $project['id']])) ?>">
-                                        <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
-                                        <input type="hidden" name="character" value="<?= Http::escape((string) $voice['character']) ?>">
-                                        <input type="hidden" name="user_id" value="<?= Http::escape((string) $roleUser['id']) ?>">
-                                        <input type="hidden" name="assigned" value="<?= $isAssigned ? '0' : '1' ?>">
-                                        <input type="hidden" name="page" value="<?= Http::escape((string) ($pagination['page'] ?? 1)) ?>">
-                                        <input type="hidden" name="filter" value="<?= Http::escape($filter) ?>">
-                                        <button class="cast-choice<?= $isAssigned ? ' is-assigned' : '' ?>" type="submit" aria-pressed="<?= $isAssigned ? 'true' : 'false' ?>" title="<?= $isAssigned ? 'Odebrat postavu ' : 'Přiřadit postavu ' ?><?= Http::escape((string) $roleUser['name']) ?>">
-                                            <span class="cast-choice-state" aria-hidden="true"><?= $isAssigned ? '✓' : '+' ?></span>
-                                            <?= Http::escape((string) $roleUser['name']) ?><?= empty($roleUser['is_active']) ? ' · neaktivní' : '' ?>
-                                        </button>
-                                    </form>
-                                    <?php endif; ?>
+                    <div class="cast-matrix-scroll">
+                        <table class="cast-matrix" data-cast-matrix>
+                            <caption class="sr-only">Přiřazení účtů k postavám. Kliknutím na buňku změníte přiřazení.</caption>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Postava</th>
+                                    <?php foreach (($data['role_users'] ?? []) as $userIndex => $roleUser): ?>
+                                        <th scope="col" data-cast-column="<?= (int) $userIndex + 1 ?>" title="<?= Http::escape((string) $roleUser['name']) ?><?= empty($roleUser['is_active']) ? ' · neaktivní účet' : '' ?>">
+                                            <span class="cast-matrix-actor"><?= Http::escape((string) $roleUser['name']) ?><?= empty($roleUser['is_active']) ? ' · neaktivní' : '' ?></span>
+                                        </th>
+                                    <?php endforeach; ?>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($voices as $voice): ?>
+                                    <tr data-cast-role-row>
+                                        <th scope="row" title="<?= Http::escape((string) $voice['character']) ?>">
+                                            <?= Http::escape((string) $voice['character']) ?>
+                                        </th>
+                                        <?php foreach (($data['role_users'] ?? []) as $userIndex => $roleUser): ?>
+                                            <?php $isAssigned = in_array((int) $roleUser['id'], $voice['assigned_users'] ?? [], true); ?>
+                                            <td data-cast-column="<?= (int) $userIndex + 1 ?>">
+                                                <form method="post" action="<?= Http::escape(Http::url('assign-voice', ['id' => (string) $project['id']])) ?>" data-cast-cell>
+                                                    <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
+                                                    <input type="hidden" name="character" value="<?= Http::escape((string) $voice['character']) ?>">
+                                                    <input type="hidden" name="user_id" value="<?= Http::escape((string) $roleUser['id']) ?>">
+                                                    <input type="hidden" name="assigned" value="<?= $isAssigned ? '0' : '1' ?>">
+                                                    <input type="hidden" name="page" value="<?= Http::escape((string) ($pagination['page'] ?? 1)) ?>">
+                                                    <input type="hidden" name="filter" value="<?= Http::escape($filter) ?>">
+                                                    <button class="cast-matrix-toggle<?= $isAssigned ? ' is-assigned' : '' ?>" type="submit" data-actor-label="<?= Http::escape((string) $roleUser['name']) ?>" data-role-label="<?= Http::escape((string) $voice['character']) ?>" data-active="<?= !empty($roleUser['is_active']) ? 'true' : 'false' ?>" aria-pressed="<?= $isAssigned ? 'true' : 'false' ?>" aria-label="<?= $isAssigned ? 'Odebrat' : 'Přiřadit' ?> <?= Http::escape((string) $roleUser['name']) ?> jako <?= Http::escape((string) $voice['character']) ?>" title="<?= $isAssigned ? 'Odebrat přiřazení' : 'Přiřadit' ?><?= empty($roleUser['is_active']) ? ' · neaktivní účet' : '' ?>">
+                                                        <span aria-hidden="true"><?= $isAssigned ? '✓' : '' ?></span>
+                                                    </button>
+                                                </form>
+                                            </td>
+                                        <?php endforeach; ?>
+                                    </tr>
                                 <?php endforeach; ?>
-                            </div>
-                        </section>
-                    <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="cast-matrix-status" data-cast-status aria-live="polite"></p>
                 </div>
             </div>
         <?php endif; ?>
@@ -206,8 +223,7 @@ $filter = (string) ($data['filter'] ?? 'all');
         <?php endforeach; ?>
     </div>
     <aside class="playlist-card" id="poslech">
-        <div class="playlist-top"><span class="playlist-icon" aria-hidden="true">♫</span><span class="card-kicker">Vybrané repliky</span></div>
-        <h2>Poslech</h2><p class="muted">Vybrané nahrávky v pořadí scénáře.</p>
+        <h2>Poslech</h2>
         <div class="master-player">
             <div class="master-controls">
                 <button type="button" class="icon-control" data-play-previous aria-label="Předchozí replika" title="Předchozí replika">←</button>
@@ -222,8 +238,7 @@ $filter = (string) ($data['filter'] ?? 'all');
             <?php else: ?>
                 <?php foreach ($playlist as $clip): ?>
                     <div class="playlist-line">
-                        <span><?= sprintf('%04d', (int) $clip['line_number']) ?> · <?= Http::escape((string) $clip['character']) ?></span>
-                        <button type="button" class="playlist-play" data-play-item aria-label="Přehrát repliku <?= sprintf('%04d', (int) $clip['line_number']) ?> — <?= Http::escape((string) $clip['character']) ?>" title="<?= Http::escape((string) $clip['file_name']) ?>" data-src="<?= Http::escape((string) $clip['audio_url']) ?>" data-label="<?= Http::escape((string) $clip['character']) ?> — <?= Http::escape((string) $clip['chapter_title']) ?>"><span aria-hidden="true">▶</span></button>
+                        <button type="button" class="playlist-play" data-play-item aria-label="Přehrát repliku <?= sprintf('%04d', (int) $clip['line_number']) ?> — <?= Http::escape((string) $clip['character']) ?>" title="<?= Http::escape((string) $clip['file_name']) ?>" data-src="<?= Http::escape((string) $clip['audio_url']) ?>" data-label="<?= Http::escape((string) $clip['character']) ?> — <?= Http::escape((string) $clip['chapter_title']) ?>"><span aria-hidden="true">▶</span><span><?= sprintf('%04d', (int) $clip['line_number']) ?> · <?= Http::escape((string) $clip['character']) ?></span></button>
                     </div>
                 <?php endforeach; ?>
             <?php endif; ?>

@@ -102,7 +102,7 @@ final class UserAdminModel
      * @param int $projectId Book identifier.
      * @param string $character Exact script character name.
      * @param bool $assigned Whether the grant should exist.
-     * @return bool Whether the project and account remain eligible.
+     * @return bool Whether the target account, book, and exact role exist.
      */
     public function setRole(
         int $actorId,
@@ -143,9 +143,97 @@ final class UserAdminModel
                     : [$projectId, $userId, $character]);
                 return true;
             },
-            false,
-            $assigned
+            false
         );
+    }
+
+    /** Add exact roles and return only grants inserted by this transaction.
+     * @param int $actorId Current administrator identifier.
+     * @param int $userId Target account identifier.
+     * @param int $projectId Existing book identifier.
+     * @param list<string> $roles Exact role names selected for this book.
+     * @return array{email:string,project_title:string,roles:list<string>}|null New grants and mail context, or null when account/book vanished.
+     * @throws FormError When roles are empty or no longer belong to the book.
+     * @throws HttpError When the actor is not an active administrator.
+     */
+    public function grantRoles(
+        int $actorId,
+        int $userId,
+        int $projectId,
+        array $roles
+    ): ?array {
+        if ($roles === []) {
+            throw new FormError('Vyberte alespoň jednu postavu.');
+        }
+        $context = null;
+        $found = $this->transactionalMutation(
+            $actorId,
+            $userId,
+            function () use (
+                $userId,
+                $projectId,
+                $roles,
+                &$context
+            ): bool {
+                $project = $this->database->prepare(
+                    'SELECT title FROM dabing_projects WHERE id = ? FOR UPDATE'
+                );
+                $project->execute([$projectId]);
+                $projectTitle = $project->fetchColumn();
+                if (!is_string($projectTitle)) {
+                    return false;
+                }
+                $roleQuery = $this->database->prepare(
+                    'SELECT l.character_name
+                     FROM dabing_script_lines l
+                     JOIN dabing_project_chapters c ON c.id = l.chapter_id
+                     WHERE c.project_id = ?
+                     ORDER BY l.id FOR UPDATE'
+                );
+                $roleQuery->execute([$projectId]);
+                $available = [];
+                foreach ($roleQuery->fetchAll(PDO::FETCH_COLUMN) as $role) {
+                    $value = (string) $role;
+                    $available[bin2hex($value)] = $value;
+                }
+                $requested = [];
+                foreach ($roles as $role) {
+                    $key = bin2hex($role);
+                    if (!isset($available[$key])) {
+                        throw new FormError(
+                            'Obsazení obsahuje postavu, která již není v knize.'
+                        );
+                    }
+                    $requested[$key] = $available[$key];
+                }
+                $emailQuery = $this->database->prepare(
+                    'SELECT email FROM dabing_users WHERE id = ?'
+                );
+                $emailQuery->execute([$userId]);
+                $email = $emailQuery->fetchColumn();
+                if (!is_string($email)) {
+                    return false;
+                }
+                $insert = $this->database->prepare(
+                    'INSERT IGNORE INTO dabing_voice_assignments '
+                    . '(project_id, character_name, user_id) VALUES (?, ?, ?)'
+                );
+                $created = [];
+                foreach ($requested as $role) {
+                    $insert->execute([$projectId, $role, $userId]);
+                    if ($insert->rowCount() === 1) {
+                        $created[] = $role;
+                    }
+                }
+                $context = [
+                    'email' => $email,
+                    'project_title' => $projectTitle,
+                    'roles' => $created,
+                ];
+                return true;
+            }
+        );
+        return $found && is_array($context) ? $context : null;
     }
 
     /** Change active state and revoke all older sessions atomically.
@@ -266,21 +354,20 @@ final class UserAdminModel
      * @param int $actorId Current administrator identifier.
      * @param int $userId Target account identifier.
      * @param callable(PDO):bool $action Database mutation receiving this connection.
+     * @param bool $protectSelf Whether to reject self-targeted operations.
      * @return bool Whether the action succeeded.
      */
     private function mutateAccount(
         int $actorId,
         int $userId,
         callable $action,
-        bool $protectSelf = false,
-        bool $requireActiveTarget = false
+        bool $protectSelf = false
     ): bool {
         return $this->transactionalMutation(
             $actorId,
             $userId,
             fn (): bool => $action($this->database),
-            $protectSelf,
-            $requireActiveTarget
+            $protectSelf
         );
     }
 
@@ -288,14 +375,14 @@ final class UserAdminModel
      * @param int $actorId Current administrator identifier.
      * @param int $userId Target account identifier.
      * @param callable():bool $action Transaction body.
+     * @param bool $protectSelf Whether to reject self-targeted operations.
      * @return bool Whether the action succeeded.
      */
     private function transactionalMutation(
         int $actorId,
         int $userId,
         callable $action,
-        bool $protectSelf = false,
-        bool $requireActiveTarget = false
+        bool $protectSelf = false
     ): bool {
         $this->database->beginTransaction();
         try {
@@ -320,10 +407,6 @@ final class UserAdminModel
             }
             $targetRow = $locked[$userId] ?? null;
             if (!is_array($targetRow)) {
-                $this->database->rollBack();
-                return false;
-            }
-            if ($requireActiveTarget && !(bool) $targetRow['is_active']) {
                 $this->database->rollBack();
                 return false;
             }

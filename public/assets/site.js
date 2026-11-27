@@ -208,6 +208,117 @@ function bindPanel(trigger, panel) {
 }
 
 /**
+ * Toggle matrix assignments in place and announce the saved result.
+ * @param {HTMLTableElement} matrix - The exact role assignment matrix.
+ * @returns {void} Successful changes update one cell without closing the panel.
+ */
+function bindCastMatrix(matrix) {
+    const status = matrix.parentElement?.parentElement?.querySelector(
+        '[data-cast-status]'
+    );
+    const clearAxisHighlights = () => {
+        matrix.querySelectorAll('.is-axis-highlight, .is-row-highlight')
+            .forEach((element) => {
+                element.classList.remove(
+                    'is-axis-highlight',
+                    'is-row-highlight'
+                );
+            });
+    };
+    const highlightTarget = (target) => {
+        clearAxisHighlights();
+        if (!(target instanceof Element)) return;
+        const row = target.closest('[data-cast-role-row]');
+        row?.classList.add('is-row-highlight');
+        const cell = target.closest('[data-cast-column]');
+        const column = cell?.getAttribute('data-cast-column');
+        if (column !== null && column !== undefined) {
+            matrix.querySelectorAll('[data-cast-column]').forEach((element) => {
+                if (element.getAttribute('data-cast-column') === column) {
+                    element.classList.add('is-axis-highlight');
+                }
+            });
+        }
+    };
+    matrix.addEventListener('pointerover', (event) => {
+        highlightTarget(event.target);
+    });
+    matrix.addEventListener('pointerout', (event) => {
+        if (event.relatedTarget instanceof Node
+            && matrix.contains(event.relatedTarget)) {
+            highlightTarget(event.relatedTarget);
+        } else {
+            clearAxisHighlights();
+        }
+    });
+    matrix.addEventListener('focusin', (event) => {
+        highlightTarget(event.target);
+    });
+    matrix.addEventListener('focusout', (event) => {
+        if (event.relatedTarget instanceof Node
+            && matrix.contains(event.relatedTarget)) {
+            highlightTarget(event.relatedTarget);
+        } else {
+            clearAxisHighlights();
+        }
+    });
+    matrix.addEventListener('submit', async (event) => {
+        const form = event.target.closest('form[data-cast-cell]');
+        if (!form || !(form instanceof HTMLFormElement)) return;
+        event.preventDefault();
+        if (form.dataset.pending === 'true') return;
+        const button = form.querySelector('button');
+        if (!button) return;
+        form.dataset.pending = 'true';
+        button.setAttribute('aria-busy', 'true');
+        if (status) status.textContent = 'Ukládám obsazení…';
+        try {
+            const response = await fetch(form.action, {
+                method: 'POST',
+                body: new FormData(form),
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+            });
+            let result;
+            try {
+                result = await response.json();
+            } catch {
+                throw new Error('Server nevrátil potvrzení změny obsazení.');
+            }
+            if (!response.ok || result.ok !== true) {
+                throw new Error(result.message ?? 'Obsazení se nepodařilo uložit.');
+            }
+            const assigned = result.assigned === true;
+            const actor = button.dataset.actorLabel ?? '';
+            const role = button.dataset.roleLabel ?? '';
+            const toggle = form.querySelector('[name="assigned"]');
+            const glyph = button.querySelector('span');
+            button.classList.toggle('is-assigned', assigned);
+            button.setAttribute('aria-pressed', String(assigned));
+            button.setAttribute(
+                'aria-label',
+                `${assigned ? 'Odebrat' : 'Přiřadit'} ${actor} jako ${role}`
+            );
+            button.title = assigned ? 'Odebrat přiřazení' : 'Přiřadit';
+            if (glyph) glyph.textContent = assigned ? '✓' : '';
+            if (toggle instanceof HTMLInputElement) {
+                toggle.value = assigned ? '0' : '1';
+            }
+            if (status) status.textContent = result.message;
+        } catch (error) {
+            if (status) {
+                status.textContent = error instanceof Error
+                    ? error.message
+                    : 'Obsazení se nepodařilo uložit.';
+            }
+        } finally {
+            delete form.dataset.pending;
+            button.removeAttribute('aria-busy');
+        }
+    });
+}
+
+/**
  * Preserve a failed recording and offer an explicit retry without playback UI.
  * @param {HTMLElement} retryArea - The line's compact failure-action container.
  * @param {HTMLElement} card - The line card containing the recording token.
@@ -866,6 +977,7 @@ document.querySelectorAll('[data-panel-trigger]').forEach((trigger) => {
         if (trigger.dataset.open === 'true') trigger.click();
     }
 });
+document.querySelectorAll('[data-cast-matrix]').forEach(bindCastMatrix);
 document.querySelectorAll('[data-recorder]').forEach(bindRecorder);
 document.querySelectorAll('[data-fill-example]').forEach((button) => {
     button.addEventListener('click', () => fillExampleScript(button));

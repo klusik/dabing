@@ -101,7 +101,10 @@ postav. Jednorázový odkaz platí 24 hodin a e-mail uvádí čas konce platnost
 v českém čase. Odkaz používá veřejný protokol, doménu, port a cestu, na níž
 správce pozvánku odeslal. Otevření odkazu zobrazí náhled. Nový příjemce
 vyplní jméno a heslo, e-mail je předvyplněný. Dabing ho po potvrzení přihlásí.
-Příjemce se stávajícím účtem pozvánku potvrdí po přihlášení stejným e-mailem.
+Stávajícího uživatele vyberte v poli **Účet příjemce** a zvolte postavy.
+Nové role se k jeho obsazení rovnou přidají a Dabing pošle informační e-mail
+s odkazem na knihu. Příjemce již odeslané pozvánky ji může potvrdit po
+přihlášení stejným e-mailem.
 
 Na nevyřízené pozvánce lze použít **Zrušit** nebo **Poslat znovu**. Opětovné
 odeslání nahradí původní odkaz a spustí novou 24hodinovou lhůtu. Chybu odeslání
@@ -109,7 +112,7 @@ zobrazí panel pozvánek, odkud lze doručení zopakovat.
 
 Každou postavu může nahrávat více lidí a jeden člověk může mít několik postav.
 Předem vybrané role se přidělí při přijetí pozvánky. Správce může obsazení
-měnit také kliknutím na jména v panelu **Obsazení** nebo ve správě uživatelů.
+měnit kliknutím na buňku v matici **Obsazení** nebo ve správě uživatelů.
 Kniha se spolupracovníkovi zobrazí po přiřazení první role. Má přístup k celému
 scénáři i všem pokusům. Nahrávat může vlastní role a filtr **Moje repliky** mu
 ukáže jejich text. Po odebrání poslední role ztratí přístup od dalšího požadavku.

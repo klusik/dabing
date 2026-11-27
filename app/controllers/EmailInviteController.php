@@ -42,6 +42,7 @@ final class EmailInviteController
         }
         $action = Http::post('action');
         $inviteId = Http::postId('invite_id');
+        $successMessage = null;
         try {
             if ($action === 'cancel' && $inviteId !== null) {
                 $this->service->cancel($projectId, $ownerId, $inviteId);
@@ -55,12 +56,35 @@ final class EmailInviteController
                     throw new FormError('Výběr postav není platný.');
                 }
                 $roles = array_values($roles);
-                $this->service->sendToProject(
-                    $projectId,
-                    $ownerId,
-                    Http::post('email'),
-                    $roles
-                );
+                $recipientUserId = Http::postId('recipient_user_id');
+                $rawRecipientUserId = Http::post('recipient_user_id');
+                if ($rawRecipientUserId !== '' && $recipientUserId === null) {
+                    throw new FormError('Vybraný účet není platný.');
+                }
+                if ($recipientUserId !== null) {
+                    if (Http::post('email') !== '') {
+                        throw new FormError(
+                            'U vybraného účtu nevyplňujte nové e-mailové pole.'
+                        );
+                    }
+                    $grant = $this->service->assignExistingAccount(
+                        $projectId,
+                        $ownerId,
+                        $recipientUserId,
+                        $roles
+                    );
+                    $successMessage = $grant['roles'] === []
+                        ? 'Vybrané postavy již účtu patřily; e-mail nebyl odeslán.'
+                        : 'Postavy byly přiřazeny a informační e-mail odeslán.';
+                } else {
+                    $this->service->sendToProject(
+                        $projectId,
+                        $ownerId,
+                        Http::post('email'),
+                        $roles
+                    );
+                    $successMessage = 'E-mailová pozvánka byla odeslána.';
+                }
             } else {
                 throw new FormError('Požadavek na pozvánku není platný.');
             }
@@ -68,7 +92,7 @@ final class EmailInviteController
             Http::notice('error', $error->getMessage());
             Http::redirect('project', ['id' => $projectId]);
         }
-        Http::notice('success', match ($action) {
+        Http::notice('success', $successMessage ?? match ($action) {
             'cancel' => 'Pozvánka byla zrušena.',
             'resend' => 'Pozvánka byla znovu odeslána.',
             default => 'E-mailová pozvánka byla odeslána.',

@@ -61,6 +61,19 @@ final class EmailInviteModel
         return $query->fetchColumn() !== false;
     }
 
+    /** Check whether any account already owns a normalized email address.
+     * @param string $email Normalized email address.
+     * @return bool True when the email belongs to an account, active or inactive.
+     */
+    public function accountExistsForEmail(string $email): bool
+    {
+        $query = $this->database->prepare(
+            'SELECT 1 FROM dabing_users WHERE LOWER(email) = LOWER(:email) LIMIT 1'
+        );
+        $query->execute(['email' => $email]);
+        return $query->fetchColumn() !== false;
+    }
+
     /** Create pending invitation and reserve one send against owner quota.
      * @param int $projectId Target book identifier.
      * @param int $ownerId Authenticated book owner.

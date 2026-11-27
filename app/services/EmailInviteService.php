@@ -43,7 +43,10 @@ final class EmailInviteService
      * @param string $storageDirectory Protected storage directory.
      * @return void No return value.
      */
-    public function __construct(PDO $database, string $storageDirectory)
+    public function __construct(
+        private readonly PDO $database,
+        string $storageDirectory
+    )
     {
         $this->invites = new EmailInviteModel($database);
         $this->studio = new StudioModel($database);
@@ -94,6 +97,11 @@ final class EmailInviteService
         if (filter_var($email, FILTER_VALIDATE_EMAIL) === false || strlen($email) > 254) {
             throw new FormError('Zadejte platnou e-mailovou adresu.');
         }
+        if ($this->invites->accountExistsForEmail($email)) {
+            throw new FormError(
+                'Tento e-mail patří existujícímu účtu. Vyberte ho ze seznamu nebo požádejte správce o přiřazení.'
+            );
+        }
         $roles = $this->validateRoles($projectId, $roles);
         $code = bin2hex(random_bytes(16));
         $hash = hash('sha256', $code);
@@ -101,6 +109,48 @@ final class EmailInviteService
             $projectId, $ownerId, $email, $roles, $hash, $this->expiry()
         );
         $this->deliver($id, $email, $code, $hash, $roles);
+    }
+
+    /** Grant selected roles to an existing account and notify only for new grants.
+     * @param int $projectId Target book.
+     * @param int $adminId Active administrator performing the change.
+     * @param int $userId Existing recipient account.
+     * @param list<string> $roles Exact selected book roles.
+     * @return array{email:string,project_title:string,roles:list<string>} Grant details and newly assigned roles.
+     * @throws FormError When roles are invalid or notification delivery fails after grants save.
+     * @throws HttpError When the actor is not an active administrator.
+     */
+    public function assignExistingAccount(
+        int $projectId,
+        int $adminId,
+        int $userId,
+        array $roles
+    ): array {
+        $grant = (new UserAdminService($this->database))->grantRoles(
+            $adminId,
+            $userId,
+            $projectId,
+            $roles
+        );
+        if ($grant['roles'] === []) {
+            return $grant;
+        }
+        try {
+            $sent = $this->mailer->sendRoleAssignmentNotice(
+                $grant['email'],
+                $projectId,
+                $grant['project_title'],
+                $grant['roles']
+            );
+        } catch (Throwable) {
+            $sent = false;
+        }
+        if (!$sent) {
+            throw new FormError(
+                'Postavy byly přiřazeny, ale informační e-mail se nepodařilo odeslat.'
+            );
+        }
+        return $grant;
     }
 
     /** Cancel one unclaimed invitation owned by the current project.

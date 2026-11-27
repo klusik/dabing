@@ -18,14 +18,29 @@ use Dabing\Http;
 /** Project invitation rows provided by the authorized owner view model. */
 $emailInvites = $data['email_invites'] ?? [];
 $inviteVoices = $data['voices'] ?? [];
+$inviteUsers = $data['role_users'] ?? [];
+$canChooseAccount = !empty($data['is_admin']);
 $inviteProjectId = (int) ($project['id'] ?? 0);
 ?>
 <div class="invite-email-tools">
     <form method="post" action="?route=email-invite&amp;id=<?= $inviteProjectId ?>" class="stack-form">
         <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
         <input type="hidden" name="action" value="send">
-        <label>E-mail spolupracovníka
-            <input type="email" name="email" autocomplete="email" maxlength="254" required>
+        <?php if ($canChooseAccount): ?>
+            <label>Účet příjemce
+                <select name="recipient_user_id">
+                    <option value="">Nová e-mailová pozvánka</option>
+                    <?php foreach ($inviteUsers as $inviteUser): ?>
+                        <option value="<?= (int) $inviteUser['id'] ?>">
+                            <?= Http::escape((string) $inviteUser['name']) ?> ·
+                            <?= Http::escape((string) $inviteUser['email']) ?><?= empty($inviteUser['is_active']) ? ' · neaktivní' : '' ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+        <?php endif; ?>
+        <label>Nový e-mail (nechte prázdný pro vybraný účet)
+            <input type="email" name="email" autocomplete="email" maxlength="254">
         </label>
         <?php if ($inviteVoices !== []): ?>
             <fieldset class="invite-role-list">
@@ -40,7 +55,7 @@ $inviteProjectId = (int) ($project['id'] ?? 0);
             </fieldset>
         <?php endif; ?>
         <input type="hidden" name="roles_end" value="1">
-        <button class="button button-ink" type="submit">Odeslat pozvánku</button>
+        <button class="button button-ink" type="submit">Odeslat</button>
     </form>
 </div>
 <?php if ($emailInvites !== []): ?>

@@ -258,9 +258,20 @@ final class StudioController
         if (empty($this->user['is_admin'])) {
             throw new HttpError(403, 'Obsazení může upravit pouze správce.');
         }
+        $wantsJson = str_contains(
+            (string) ($_SERVER['HTTP_ACCEPT'] ?? ''),
+            'application/json'
+        );
         $character = Http::post('character');
         $targetUserId = Http::postId('user_id');
         if ($targetUserId === null) {
+            if ($wantsJson) {
+                Http::json([
+                    'ok' => false,
+                    'message' => 'Vyberte platný účet.',
+                ], 422);
+                return;
+            }
             Http::notice('error', 'Vyberte platný účet.');
             Http::redirect('project', [
                 'id' => $projectId,
@@ -274,8 +285,23 @@ final class StudioController
                 $userId, $targetUserId, $projectId, $character, $assigned
             );
         } catch (FormError $error) {
+            if ($wantsJson) {
+                Http::json([
+                    'ok' => false,
+                    'message' => $error->getMessage(),
+                ], 422);
+                return;
+            }
             Http::notice('error', $error->getMessage());
             Http::redirect('project', ['id' => $projectId, 'page' => $page, 'cast' => 1]);
+        }
+        if ($wantsJson) {
+            Http::json([
+                'ok' => true,
+                'assigned' => $assigned,
+                'message' => $assigned ? 'Hlas byl přiřazen.' : 'Hlas byl odebrán.',
+            ]);
+            return;
         }
         Http::notice('success', $assigned ? 'Hlas byl přiřazen.' : 'Hlas byl odebrán.');
         Http::redirect('project', [
