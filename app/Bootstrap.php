@@ -22,6 +22,7 @@ use Dabing\EmailInviteController;
 use Dabing\EmailInviteService;
 use Dabing\InstallService;
 use Dabing\StudioController;
+use Dabing\UserAdminController;
 
 $root = dirname(__DIR__);
 $storage = $root . DIRECTORY_SEPARATOR . 'storage';
@@ -49,10 +50,12 @@ if (is_file($storage . DIRECTORY_SEPARATOR . 'config.php')) {
 $classes = [
     'app/HttpError.php', 'app/FormError.php', 'app/Http.php',
     'app/models/AccountModel.php', 'app/models/InstallModel.php',
+    'app/models/UserAdminModel.php',
     'app/models/EmailInviteModel.php',
     'app/models/UpdateMigrationModel.php',
     'app/services/UpdateMigrationService.php',
     'app/services/InstallService.php', 'app/services/AuthService.php',
+    'app/services/UserAdminService.php',
     'app/services/GitHubReleaseClient.php', 'app/services/UpdatePackage.php',
     'app/services/UpdateService.php',
     'app/services/TakeNaming.php', 'app/services/ScriptImport.php',
@@ -60,6 +63,7 @@ $classes = [
     'app/models/StudioModel.php', 'app/services/StudioService.php',
     'app/services/InviteMailer.php', 'app/services/EmailInviteService.php',
     'app/controllers/AccountController.php', 'app/controllers/UpdateController.php',
+    'app/controllers/UserAdminController.php',
     'app/controllers/StudioController.php',
     'app/controllers/EmailInviteController.php',
 ];
@@ -73,10 +77,9 @@ Http::boot();
 $routes = [
     'install' => ['GET', 'POST'], 'login' => ['GET', 'POST'],
     'account' => ['GET', 'POST'],
-    'register' => ['GET', 'POST'], 'logout' => ['POST'],
+    'logout' => ['POST'], 'users' => ['GET', 'POST'],
     'projects' => ['GET', 'POST'], 'project' => ['GET'],
-    'invite' => ['POST'], 'assign-voice' => ['POST'],
-    'join' => ['GET', 'POST'],
+    'assign-voice' => ['POST'],
     'email-invite' => ['POST'], 'email-join' => ['GET', 'POST'],
     'update' => ['GET', 'POST'],
     'select-take' => ['POST'], 'upload' => ['POST'],
@@ -99,7 +102,6 @@ try {
     }
 
     $install = new InstallService($storage, $root . DIRECTORY_SEPARATOR . 'database');
-    Http::configurePublicBase($install->publicBaseUrl());
     $account = new AccountController($install);
     $installed = $install->isInstalled();
 
@@ -125,10 +127,6 @@ try {
         $account->login($auth);
         exit;
     }
-    if ($route === 'register') {
-        $account->register($auth);
-        exit;
-    }
     if ($route === 'logout') {
         $account->logout($auth);
         exit;
@@ -143,17 +141,6 @@ try {
         }
         $updates = new Dabing\UpdateService($root, $install, $applicationLock);
         (new Dabing\UpdateController($updates))->handle($user);
-        exit;
-    }
-    if ($route === 'join' && $user === null) {
-        $token = Http::query('token');
-        if (preg_match('/\A[a-f0-9]{64}\z/D', $token) === 1) {
-            $_SESSION['pending_invite'] = $token;
-            Http::redirect('login');
-        }
-        Http::render('join', 'Pozvánka do knihy', [
-            'token' => '', 'valid' => false,
-        ]);
         exit;
     }
     if ($user === null) {
@@ -179,6 +166,11 @@ try {
         exit;
     }
 
+    if ($route === 'users') {
+        (new UserAdminController($database))->handle($user);
+        exit;
+    }
+
     $studio = new StudioController($database, $storage, $user);
     switch ($route) {
         case 'projects':
@@ -187,14 +179,8 @@ try {
         case 'project':
             $studio->project();
             break;
-        case 'invite':
-            $studio->invite();
-            break;
         case 'assign-voice':
             $studio->assignVoice();
-            break;
-        case 'join':
-            $studio->join();
             break;
         case 'select-take':
             $studio->selectTake();

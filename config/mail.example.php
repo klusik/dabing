@@ -7,19 +7,17 @@ declare(strict_types=1);
  * Repository: klusik/dabing
  * File: config/mail.example.php
  * Module Type: Example configuration
- * Purpose: Show the non-secret settings needed for email invitations.
- * Responsibilities: Document canonical URL, sender, and optional local SMTP relay keys.
+ * Purpose: Document static sender configuration for invitation email.
+ * Responsibilities: Provide the sender setting for protected storage/mail.php.
  * Author: Rudolf Klusal
  * License: All rights reserved
  */
 
 return [
-    // Set this to the canonical public installation URL; never derive links from request Host.
-    'base_url' => 'https://studio.example.com',
+    // The public base URL is derived from the validated browser-visible request.
     'from' => 'noreply@example.com',
 
-    // Optional Windows development values for a local Mailpit relay.
-    // Change the port to match the disposable QA Mailpit if needed.
+    // Optional Windows-only local Mailpit relay; Linux/WEDOS uses PHP mail().
     'smtp_host' => '127.0.0.1',
     'smtp_port' => 1025,
 ];

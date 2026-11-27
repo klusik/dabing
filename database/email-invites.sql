@@ -2,8 +2,8 @@
 -- Repository: klusik/dabing
 -- File: database/email-invites.sql
 -- Module Type: Database schema
--- Purpose: Store delivered one-time project email invitations.
--- Responsibilities: Persist invitation claims and bounded owner sending limits.
+-- Purpose: Store email invitations, selected voice roles, and sending limits.
+-- Responsibilities: Persist invite status and optional role selections.
 -- Author: Rudolf Klusal
 -- License: All rights reserved.
 
@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS dabing_email_invites (
     claimed_at DATETIME NULL,
     invalidated_at DATETIME NULL,
     attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    delivery_error VARCHAR(255) NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uq_dabing_email_invites_code (code_hash),
     KEY idx_dabing_email_invites_project_email (project_id, invited_email),
@@ -32,6 +33,16 @@ CREATE TABLE IF NOT EXISTS dabing_email_invites (
     CONSTRAINT fk_dabing_email_invites_claimant
         FOREIGN KEY (claimed_by_user_id) REFERENCES dabing_users (id)
         ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS dabing_email_invite_roles (
+    invite_id INT UNSIGNED NOT NULL,
+    character_name VARCHAR(100)
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    PRIMARY KEY (invite_id, character_name),
+    CONSTRAINT fk_dabing_email_invite_roles_invite
+        FOREIGN KEY (invite_id) REFERENCES dabing_email_invites (id)
+        ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS dabing_email_invite_limits (

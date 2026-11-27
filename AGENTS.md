@@ -40,6 +40,14 @@
 - Drž instalaci nezávislou na interním umístění webového adresáře. Zabraň
   přímému přístupu k údaji pro instalaci, konfiguraci, originálům nahrávek
   a Git metadatům. Přístup k projektu ověřuj u každé akce a přehrávání.
+- Rozhraní navrhuj vždy velmi kompaktně. V přehledech používej husté tabulky
+  nebo řádky s jedním záznamem na řádek. Běžné údaje, přehrávače a akce drž
+  vedle sebe, kde se vejdou. Používej malé zavedené ikony s přístupným
+  názvem a tooltipem. Formuláře otevírej u jejich ovladače.
+- Odstraň nadbytečné svislé mezery, výplňové popisky, dekorativní mezititulky
+  a velké karty pro jednotlivé záznamy. Na malé šířce zalamuj společné
+  prvky a zachovej čitelnost i pohodlné cíle pro dotyk. Při kontrole
+  desktopu a mobilu ověř hustotu řádků a viditelnost otevřených panelů.
 - Ovládací prvky používají vlastní Theme tokeny, utlumené průsvitné plochy,
   jasnou hierarchii akcí, čitelný focus a pohodlné mobilní cíle. Kontextový
   panel kotvi k jeho ovladači a umožni zavření přes Escape i kliknutí mimo.

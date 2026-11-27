@@ -8,14 +8,12 @@ namespace Dabing;
  * Repository: klusik/dabing
  * File: app/services/StudioService.php
  * Module Type: Service
- * Purpose: Apply studio project, invite, take, and playback policies.
+ * Purpose: Apply studio project, take, and playback policies.
  * Responsibilities: Coordinate script validation, persistence, storage, and authorization.
  * Author: Rudolf Klusal
  * License: All rights reserved.
  */
 
-use DateTimeImmutable;
-use DateTimeZone;
 
 /** Coordinates private studio workflows without HTTP concerns. */
 final class StudioService
@@ -25,13 +23,6 @@ final class StudioService
      * Consumers: cleanupPendingFiles(); Rationale: bounds stale-file retries.
      */
     private const PENDING_DELETE_CLEANUP_BATCH_SIZE = 20;
-
-    /**
-     * Integer; units: seconds; scope: collaborator invitation; consumers:
-     * createInvite(); rationale: invitation links expire after seven days.
-     */
-    private const INVITE_TTL_SECONDS = 604800;
-
 
     /**
      * Create the studio service dependencies.
@@ -64,65 +55,6 @@ final class StudioService
     }
 
     /**
-     * Create an expiring one-use collaborator invite.
-     *
-     * @param int $projectId Project receiving a collaborator.
-     * @param int $ownerId Authenticated owner requesting invite.
-     * @return string Raw URL-safe token, returned once to the controller.
-     * @throws FormError When the user is not the project owner.
-     */
-    public function createInvite(int $projectId, int $ownerId): string
-    {
-        if (!$this->model->isOwner($projectId, $ownerId)) {
-            throw new FormError('Pozvánku může vytvořit pouze autor projektu.');
-        }
-        $token = bin2hex(random_bytes(32));
-        $expires = (new DateTimeImmutable('now', new DateTimeZone('UTC')))
-            ->modify('+' . self::INVITE_TTL_SECONDS . ' seconds')
-            ->format('Y-m-d H:i:s');
-        $this->model->createInvite($projectId, hash('sha256', $token), $expires);
-        return $token;
-    }
-
-    /**
-     * Apply an owner-selected character assignment or clear it.
-     *
-     * @param int $projectId Project receiving the voice assignment.
-     * @param int $ownerId Authenticated project owner.
-     * @param string $character Exact character label in the script.
-     * @param int|null $userId Member receiving the role, or null to clear.
-     * @return void No value is returned.
-     * @throws FormError When the character, member, or owner is invalid.
-     */
-    public function assignVoice(
-        int $projectId,
-        int $ownerId,
-        string $character,
-        ?int $userId
-    ): void {
-        if ($character === '') {
-            throw new FormError('Vyberte postavu ze scénáře.');
-        }
-        $this->model->assignVoice($projectId, $ownerId, $character, $userId);
-    }
-
-    /**
-     * Claim a valid invitation for the authenticated user.
-     *
-     * @param string $token Presented raw invitation token.
-     * @param int $userId Authenticated user claiming access.
-     * @return int Joined project identifier.
-     * @throws FormError When token is malformed, expired, or already consumed.
-     */
-    public function claimInvite(string $token, int $userId): int
-    {
-        if (preg_match('/\A[a-f0-9]{64}\z/D', $token) !== 1) {
-            throw new FormError('Pozvánka je neplatná nebo expirovaná.');
-        }
-        return $this->model->claimInvite(hash('sha256', $token), $userId);
-    }
-
-    /**
      * Store one new attempt for an authorized script line.
      *
      * @param int $projectId Requested project.
@@ -130,6 +62,7 @@ final class StudioService
      * @param int $userId Authenticated recorder.
      * @param array{name:string,type:string,tmp_name:string,error:int,size:int} $file PHP upload metadata.
      * @param string|null $takeToken Optional stable client token for safe retries.
+     * @param bool $isAdmin Whether the requester has global administrator access.
      * @return array{recording_id:int,attempt_no:int,file_name:string,reused:bool} Saved or replayed take metadata.
      * @throws FormError When the token, file, or take authorization is invalid.
      */
@@ -138,7 +71,8 @@ final class StudioService
         int $lineId,
         int $userId,
         array $file,
-        ?string $takeToken = null
+        ?string $takeToken = null,
+        bool $isAdmin = false
     ): array {
         $idempotencyPrefix = null;
         if ($takeToken !== null) {
@@ -159,7 +93,7 @@ final class StudioService
                 RecordingStorage::IDEMPOTENCY_PREFIX_HEX_CHARS
             );
         }
-        if (!$this->model->canRecord($projectId, $lineId, $userId)) {
+        if (!$isAdmin && !$this->model->canRecord($projectId, $lineId, $userId)) {
             throw new FormError('Tato replika není přiřazena vašemu hlasu.');
         }
         // A token replay may return an existing take after a later role change.
@@ -172,7 +106,8 @@ final class StudioService
                 $staged['key'],
                 $staged['mime'],
                 $staged['size'],
-                $idempotencyPrefix
+                $idempotencyPrefix,
+                $isAdmin
             );
         } catch (\Throwable $exception) {
             if ($idempotencyPrefix === null) {
@@ -211,6 +146,7 @@ final class StudioService
      * @param int $lineId Script line containing the take.
      * @param int $recordingId Take selected for removal.
      * @param int $userId Authenticated owner or take creator.
+     * @param bool $isAdmin Whether the requester has global administrator access.
      * @return void No value is returned.
      * @throws FormError When the take is missing or the requester cannot delete it.
      */
@@ -218,10 +154,11 @@ final class StudioService
         int $projectId,
         int $lineId,
         int $recordingId,
-        int $userId
+        int $userId,
+        bool $isAdmin = false
     ): void {
         $take = $this->model->beginTakeDeletion(
-            $projectId, $lineId, $recordingId, $userId
+            $projectId, $lineId, $recordingId, $userId, $isAdmin
         );
         if ($take === null) {
             throw new FormError('Tento pokus nelze odstranit.');
@@ -265,13 +202,14 @@ final class StudioService
      *
      * @param int $projectId Project requested for export.
      * @param int $userId Authenticated project owner or member.
+     * @param bool $isAdmin Whether the requester has global administrator access.
      * @return array{stream:resource,size:int,file_name:string,key:string}|null Ready archive, or null when access is denied.
      * @throws FormError When the authorized book has no saved takes.
      * @throws HttpError When ZIP or archive storage fails.
      */
-    public function createBookArchive(int $projectId, int $userId): ?array
+    public function createBookArchive(int $projectId, int $userId, bool $isAdmin = false): ?array
     {
-        $book = $this->model->exportTakes($projectId, $userId);
+        $book = $this->model->exportTakes($projectId, $userId, $isAdmin);
         if ($book === null) {
             return null;
         }
@@ -394,11 +332,12 @@ final class StudioService
      *
      * @param int $recordingId Requested recording.
      * @param int $userId Authenticated listener.
+     * @param bool $isAdmin Whether the requester has global administrator access.
      * @return array{recording:array{id:int,project_id:int,storage_key:string,media_type:string,byte_size:int},stream:resource}|null Authorized stream or null.
      */
-    public function openRecording(int $recordingId, int $userId): ?array
+    public function openRecording(int $recordingId, int $userId, bool $isAdmin = false): ?array
     {
-        $recording = $this->model->recordingForUser($recordingId, $userId);
+        $recording = $this->model->recordingForUser($recordingId, $userId, $isAdmin);
         if ($recording === null) {
             return null;
         }

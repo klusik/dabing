@@ -46,12 +46,12 @@ final class AccountModel
 
     /** Find one account by normalized email.
      * @param string $email Lowercase email address.
-     * @return array{id:int,name:string,email:string,password_hash:string,is_admin:bool}|null Account row or null.
+     * @return array{id:int,name:string,email:string,password_hash:string,is_admin:bool,is_active:bool,session_version:int}|null Account row or null.
      */
     public function findByEmail(string $email): ?array
     {
         $statement = $this->database->prepare(
-            'SELECT id, name, email, password_hash, is_admin '
+            'SELECT id, name, email, password_hash, is_admin, is_active, session_version '
             . 'FROM dabing_users WHERE email = :email LIMIT 1'
         );
         $statement->execute(['email' => $email]);
@@ -65,17 +65,19 @@ final class AccountModel
             'email' => (string) $row['email'],
             'password_hash' => (string) $row['password_hash'],
             'is_admin' => (bool) $row['is_admin'],
+            'is_active' => (bool) $row['is_active'],
+            'session_version' => (int) $row['session_version'],
         ];
     }
 
     /** Find one account by numeric identifier.
      * @param int $id Account primary key.
-     * @return array{id:int,name:string,email:string,password_hash:string,is_admin:bool}|null Account row or null.
+     * @return array{id:int,name:string,email:string,password_hash:string,is_admin:bool,is_active:bool,session_version:int}|null Account row or null.
      */
     public function findById(int $id): ?array
     {
         $statement = $this->database->prepare(
-            'SELECT id, name, email, password_hash, is_admin '
+            'SELECT id, name, email, password_hash, is_admin, is_active, session_version '
             . 'FROM dabing_users WHERE id = :id LIMIT 1'
         );
         $statement->execute(['id' => $id]);
@@ -89,6 +91,8 @@ final class AccountModel
             'email' => (string) $row['email'],
             'password_hash' => (string) $row['password_hash'],
             'is_admin' => (bool) $row['is_admin'],
+            'is_active' => (bool) $row['is_active'],
+            'session_version' => (int) $row['session_version'],
         ];
     }
 

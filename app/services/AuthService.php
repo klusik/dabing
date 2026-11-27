@@ -11,8 +11,8 @@ use PDO;
  * Repository: klusik/dabing
  * File: app/services/AuthService.php
  * Module Type: Service
- * Purpose: Apply account authentication and registration policy.
- * Responsibilities: Validate credentials, throttle attempts, and manage sessions.
+ * Purpose: Apply account authentication and session policy.
+ * Responsibilities: Validate credentials and manage versioned sessions.
  * Author: Rudolf Klusal
  * License: All rights reserved
  */
@@ -43,7 +43,8 @@ final class AuthService
         $this->accounts = new AccountModel($database);
     }
 
-    /** Return the current session account only while its password hash is unchanged.
+    /** Return the current account after active, session-version and fingerprint checks.
+     * Legacy sessions without a version use 0 only when their password fingerprint is valid.
      * @return array{id:int,name:string,email:string,is_admin:bool}|null Authenticated account or null.
      */
     public function currentUser(): ?array
@@ -51,16 +52,23 @@ final class AuthService
         $user = $_SESSION['user'] ?? null;
         $fingerprint = $_SESSION['auth_password_fingerprint'] ?? null;
         if (!is_array($user)) {
-            unset($_SESSION['auth_password_fingerprint']);
+            unset(
+                $_SESSION['auth_password_fingerprint'],
+                $_SESSION['auth_session_version']
+            );
             return null;
         }
+        $sessionVersion = $_SESSION['auth_session_version'] ?? 0;
         if (!isset($user['id'], $user['name'], $user['email'])
             || !is_string($fingerprint)) {
             self::invalidateSessionAuthentication();
             return null;
         }
         $account = $this->accounts->findById((int) $user['id']);
-        if ($account === null || !hash_equals(
+        if ($account === null || !$account['is_active']
+            || !is_int($sessionVersion)
+            || $sessionVersion !== $account['session_version']
+            || !hash_equals(
             $fingerprint,
             self::passwordFingerprint($account['password_hash'])
         )) {
@@ -87,7 +95,8 @@ final class AuthService
             return null;
         }
         $account = $this->accounts->findByEmail($normalized);
-        if ($account === null || !password_verify($password, $account['password_hash'])) {
+        if ($account === null || !$account['is_active']
+            || !password_verify($password, $account['password_hash'])) {
             return null;
         }
         $this->accounts->clearAttempts($key);
@@ -98,6 +107,29 @@ final class AuthService
         $_SESSION['auth_password_fingerprint'] = self::passwordFingerprint(
             $account['password_hash']
         );
+        $_SESSION['auth_session_version'] = $account['session_version'];
+        session_regenerate_id(true);
+        return $this->currentUser();
+    }
+
+    /** Authenticate an account by identifier after an atomic invite claim.
+     * @param int $id Account primary key.
+     * @return array{id:int,name:string,email:string,is_admin:bool}|null Active account or null.
+     */
+    public function loginById(int $id): ?array
+    {
+        $account = $this->accounts->findById($id);
+        if ($account === null || !$account['is_active']) {
+            return null;
+        }
+        $_SESSION['user'] = [
+            'id' => $account['id'], 'name' => $account['name'],
+            'email' => $account['email'], 'is_admin' => $account['is_admin'],
+        ];
+        $_SESSION['auth_password_fingerprint'] = self::passwordFingerprint(
+            $account['password_hash']
+        );
+        $_SESSION['auth_session_version'] = $account['session_version'];
         session_regenerate_id(true);
         return $this->currentUser();
     }
@@ -119,52 +151,6 @@ final class AuthService
             throw new FormError($label . ' musí mít alespoň 12 znaků.');
         }
     }
-    /** Register a regular collaborator account.
-     * @param string $name Display name.
-     * @param string $email Submitted email.
-     * @param string $password Submitted password.
-     * @param string $passwordConfirm Password confirmation.
-     * @return array{id:int,name:string,email:string,is_admin:bool} Created account.
-     * @throws FormError When validation or uniqueness fails.
-     */
-    public function register(string $name, string $email, string $password, string $passwordConfirm): array
-    {
-        $name = trim($name);
-        $email = self::normalizeEmail($email);
-        if (!$this->accounts->beginAttempt(self::throttleKey('register', ''))) {
-            throw new FormError('Registrace je dočasně omezena. Zkuste to později.');
-        }
-        if ($name === '' || mb_strlen($name) > 120) {
-            throw new FormError('Zadejte jméno do 120 znaků.');
-        }
-        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false
-            || strlen($email) > 254) {
-            throw new FormError('Zadejte platnou e-mailovou adresu.');
-        }
-        self::validateNewPassword($password);
-        if (!hash_equals($password, $passwordConfirm)) {
-            throw new FormError('Hesla se neshodují.');
-        }
-        if ($this->accounts->findByEmail($email) !== null) {
-            throw new FormError('Registraci se nepodařilo dokončit.');
-        }
-        $admin = false;
-        try {
-            $id = $this->accounts->create(
-                $name,
-                $email,
-                password_hash($password, PASSWORD_DEFAULT),
-                $admin
-            );
-        } catch (\PDOException $error) {
-            if ((string) $error->getCode() === '23000') {
-                throw new FormError('Registraci se nepodařilo dokončit.');
-            }
-            throw $error;
-        }
-        return ['id' => $id, 'name' => $name, 'email' => $email, 'is_admin' => $admin];
-    }
-
     /** Change the authenticated account password and invalidate other sessions.
      * @param string $currentPassword Current password, which may be legacy-weak.
      * @param string $password New password to validate and hash.
@@ -208,7 +194,10 @@ final class AuthService
      */
     public function logout(): void
     {
-        unset($_SESSION['user'], $_SESSION['auth_password_fingerprint']);
+        unset(
+            $_SESSION['user'], $_SESSION['auth_password_fingerprint'],
+            $_SESSION['auth_session_version']
+        );
         session_regenerate_id(true);
     }
 
@@ -226,7 +215,10 @@ final class AuthService
      */
     private static function invalidateSessionAuthentication(): void
     {
-        unset($_SESSION['user'], $_SESSION['auth_password_fingerprint']);
+        unset(
+            $_SESSION['user'], $_SESSION['auth_password_fingerprint'],
+            $_SESSION['auth_session_version']
+        );
         if (session_status() === PHP_SESSION_ACTIVE) {
             session_regenerate_id(true);
         }
