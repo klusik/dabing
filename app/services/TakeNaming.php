@@ -8,8 +8,8 @@ namespace Dabing;
  * Repository: klusik/dabing
  * File: app/services/TakeNaming.php
  * Module Type: Service
- * Purpose: Build stable safe filenames for numbered recording attempts.
- * Responsibilities: Normalize Czech book titles and validate filename numbers and extensions.
+ * Purpose: Build safe filenames for numbered takes and book archives.
+ * Responsibilities: Normalize Czech titles and name supported take and archive downloads.
  * Author: Rudolf Klusal
  * License: All rights reserved.
  */
@@ -68,6 +68,17 @@ final class TakeNaming
         $slug = self::titleSlug($title);
         return $slug . '_' . sprintf('%04d_%03d', $lineNumber, $attemptNumber)
             . '.' . $extensions[$mediaType];
+    }
+
+    /**
+     * Create a safe archive filename for a book's saved takes.
+     *
+     * @param string $title Original book title.
+     * @return string Lowercase ASCII filename ending in _nahravky.zip.
+     */
+    public static function archiveFileName(string $title): string
+    {
+        return self::titleSlug($title) . '_nahravky.zip';
     }
 
     /**

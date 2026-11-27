@@ -126,6 +126,17 @@ Heslo se mění v nastavení účtu po zadání současného hesla. Po úspěšn
 změně zůstane aktuální relace přihlášená. Ostatní relace stejného účtu
 budou vyžadovat nové přihlášení.
 
+## Export ZIP
+
+Ovládací prvek ZIP v horní liště knihy stáhne všechny její uložené pokusy
+v pořadí replik a pokusů. Soubory jsou přímo v kořeni archivu a zachovají si
+názvy jednotlivých stažení, například `o_pejskovi_0001_001.mp3`.
+Členové knihy dostanou například archiv `o_pejskovi_nahravky.zip`.
+
+Export vyžaduje rozšíření PHP `zip`. Server připraví archiv v neveřejném
+úložišti a po odeslání jej odstraní. Při přípravě potřebuje volné místo
+pro velikost archivu.
+
 ## Pošta pro pozvánky
 
 Zkopírujte `config/mail.example.php` do neveřejného `storage/mail.php`.

@@ -152,6 +152,7 @@ final class StudioController
         }
         unset($track);
         $view['can_invite'] = $view['project']['role'] === 'owner';
+        $view['export_url'] = Http::url('export-book', ['id' => $projectId]);
         $view['invite_url'] = null;
         if (session_status() === PHP_SESSION_ACTIVE) {
             $inviteUrl = $_SESSION['studio_invite_url'] ?? null;
@@ -375,6 +376,53 @@ final class StudioController
         }
         Http::notice('success', 'Pokus byl odstraněn.');
         Http::redirect('project', ['id' => $projectId, 'page' => $page]);
+    }
+
+    /**
+     * Build and stream every saved take in an authorized book as one ZIP.
+     *
+     * @return void No value is returned.
+     */
+    public function exportBook(): void
+    {
+        if (Http::method() !== 'GET') {
+            throw new HttpError(405, 'Metoda není podporována.');
+        }
+        $projectId = Http::queryId('id');
+        if ($projectId === null) {
+            throw new HttpError(404, 'Kniha nebyla nalezena.');
+        }
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+        try {
+            $archive = $this->service->createBookArchive(
+                $projectId,
+                $this->userId()
+            );
+        } catch (FormError $error) {
+            throw new HttpError(422, $error->getMessage());
+        }
+        if ($archive === null) {
+            throw new HttpError(404, 'Kniha nebyla nalezena.');
+        }
+        http_response_code(200);
+        header('Content-Type: application/zip');
+        header('Content-Length: ' . $archive['size']);
+        header('Content-Disposition: attachment; filename="'
+            . $archive['file_name'] . '"');
+        header('Cache-Control: private, no-store, no-cache, must-revalidate');
+        header('X-Content-Type-Options: nosniff');
+        $previousIgnoreAbort = ignore_user_abort(true);
+        try {
+            fpassthru($archive['stream']);
+        } finally {
+            ignore_user_abort((bool) $previousIgnoreAbort);
+            $this->service->closeBookArchive(
+                $archive['stream'],
+                $archive['key']
+            );
+        }
     }
 
     /**

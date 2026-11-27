@@ -170,7 +170,7 @@ final class StudioModel
      * @param int $projectId Requested project identifier.
      * @param int $userId Authenticated viewer identifier.
      * @param int $requestedPage One-based visible script page.
-     * @return array{project:array{id:int,title:string,role:string},chapters:list<array{id:int,title:string,lines:list<array{id:int,number:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,assigned_name:?string,can_record:bool,takes:list<array{id:int,attempt_no:int,media_type:string,user_id:int,user_name:string,created_at:string,is_selected:bool,can_delete:bool}>}>}>,members:list<array{id:int,name:string,role:string}>,voices:list<array{character:string,assigned_user_id:?int,assigned_name:?string}>,playlist:list<array{recording_id:int,line_number:int,character:string,chapter_title:string,attempt_no:int,media_type:string}>,pagination:array{page:int,pages:int,total:int}}|null
+     * @return array{project:array{id:int,title:string,role:string},chapters:list<array{id:int,title:string,lines:list<array{id:int,number:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,assigned_name:?string,can_record:bool,takes:list<array{id:int,attempt_no:int,media_type:string,user_id:int,user_name:string,created_at:string,is_selected:bool,can_delete:bool}>}>}>,members:list<array{id:int,name:string,role:string}>,voices:list<array{character:string,assigned_user_id:?int,assigned_name:?string}>,playlist:list<array{recording_id:int,line_number:int,character:string,chapter_title:string,attempt_no:int,media_type:string}>,pagination:array{page:int,pages:int,total:int},has_recordings:bool}|null
      *     Ordered page and playback data, or null when access is not allowed.
      */
     public function projectView(
@@ -181,7 +181,15 @@ final class StudioModel
         $projectQuery = $this->database->prepare(
             'SELECT p.id, p.title, p.owner_user_id,
                     CASE WHEN p.owner_user_id = :owner THEN \'owner\'
-                         ELSE \'member\' END AS role
+                         ELSE \'member\' END AS role,
+                    EXISTS (
+                        SELECT 1 FROM dabing_recordings any_recording
+                        JOIN dabing_script_lines any_line
+                          ON any_line.id = any_recording.line_id
+                        JOIN dabing_project_chapters any_chapter
+                          ON any_chapter.id = any_line.chapter_id
+                        WHERE any_chapter.project_id = p.id
+                    ) AS has_recordings
              FROM dabing_projects p
              JOIN dabing_project_members m ON m.project_id = p.id
              WHERE p.id = :project AND m.user_id = :member'
@@ -409,7 +417,67 @@ final class StudioModel
                 'pages' => $pages,
                 'total' => $totalLines,
             ],
+            'has_recordings' => (int) $projectRow['has_recordings'] === 1,
         ];
+    }
+
+    /**
+     * Return ordered mapped take metadata for an authorized whole-book export.
+     *
+     * @param int $projectId Requested project identifier.
+     * @param int $userId Authenticated owner or project member.
+     * @return array{title:string,takes:iterable<array{line_number:int,storage_key:string,media_type:string,byte_size:int,attempt_no:int}>}|null Book metadata and lazy takes, or null when access is denied.
+     */
+    public function exportTakes(int $projectId, int $userId): ?array
+    {
+        $statement = $this->database->prepare(
+            'SELECT p.title AS project_title, l.id AS line_id,
+                    r.id AS recording_id, r.storage_key, r.media_type,
+                    r.byte_size, r.attempt_no
+             FROM dabing_projects p
+             JOIN dabing_project_members m ON m.project_id = p.id
+             LEFT JOIN dabing_project_chapters c ON c.project_id = p.id
+             LEFT JOIN dabing_script_lines l ON l.chapter_id = c.id
+             LEFT JOIN dabing_recordings r ON r.line_id = l.id
+             WHERE p.id = ? AND m.user_id = ?
+             ORDER BY c.position, c.id, l.position, l.id,
+                      r.attempt_no, r.id'
+        );
+        $statement->execute([$projectId, $userId]);
+        $first = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($first)) {
+            $statement->closeCursor();
+            return null;
+        }
+        $takes = (function () use ($statement, $first): \Generator {
+            $lineNumber = 0;
+            $previousLineId = null;
+            $row = $first;
+            try {
+                while (is_array($row)) {
+                    if ($row['line_id'] !== null) {
+                        $lineId = (int) $row['line_id'];
+                        if ($lineId !== $previousLineId) {
+                            ++$lineNumber;
+                            $previousLineId = $lineId;
+                        }
+                        if ($row['recording_id'] !== null) {
+                            yield [
+                                'line_number' => $lineNumber,
+                                'storage_key' => (string) $row['storage_key'],
+                                'media_type' => (string) $row['media_type'],
+                                'byte_size' => (int) $row['byte_size'],
+                                'attempt_no' => (int) $row['attempt_no'],
+                            ];
+                        }
+                    }
+                    $row = $statement->fetch(PDO::FETCH_ASSOC);
+                }
+            } finally {
+                $statement->closeCursor();
+            }
+        })();
+        return ['title' => (string) $first['project_title'], 'takes' => $takes];
     }
 
     /**
