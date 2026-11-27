@@ -24,6 +24,7 @@ use Dabing\Http;
             <?php foreach (($data['errors'] ?? []) as $error): ?><p class="form-error" role="alert"><?= Http::escape((string) $error) ?></p><?php endforeach; ?>
             <label>Instalační klíč <input name="install_key" type="password" autocomplete="off" required></label>
             <div class="form-divider"><span>Databáze</span></div>
+            <label>Veřejná adresa (volitelné) <input name="base_url" type="url" value="<?= Http::escape((string) ($data['values']['base_url'] ?? '')) ?>" autocomplete="url"><small>Používá se pro odkazy a přesměrování. Ponechte prázdné, pokud adresu ještě neznáte.</small></label>
             <div class="field-grid">
                 <label>Server <input name="db_host" value="<?= Http::escape((string) ($data['values']['db_host'] ?? 'localhost')) ?>" autocomplete="off" required></label>
                 <label>Port <input name="db_port" inputmode="numeric" value="<?= Http::escape((string) ($data['values']['db_port'] ?? '3306')) ?>" required></label>

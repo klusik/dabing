@@ -24,16 +24,43 @@ use Dabing\InstallService;
 use Dabing\StudioController;
 
 $root = __DIR__;
+$storage = $root . DIRECTORY_SEPARATOR . 'storage';
+require_once $root . DIRECTORY_SEPARATOR . 'app'
+    . DIRECTORY_SEPARATOR . 'services'
+    . DIRECTORY_SEPARATOR . 'ApplicationUpdateLock.php';
+$applicationLock = new Dabing\ApplicationUpdateLock($storage);
+if (is_file($storage . DIRECTORY_SEPARATOR . 'config.php')) {
+    if (!$applicationLock->acquireShared()) {
+        http_response_code(503);
+        header('Content-Type: text/plain; charset=UTF-8');
+        header('Cache-Control: no-store');
+        echo 'Aplikace se právě aktualizuje. Zkuste to prosím za chvíli.';
+        exit;
+    }
+    if ($applicationLock->recoveryRequired()) {
+        $applicationLock->release();
+        http_response_code(503);
+        header('Content-Type: text/plain; charset=UTF-8');
+        header('Cache-Control: no-store');
+        echo 'Aplikace vyžaduje obnovu. Obnovte soubory ze zálohy podle README a poté odstraňte značku údržby.';
+        exit;
+    }
+}
 $classes = [
     'app/HttpError.php', 'app/FormError.php', 'app/Http.php',
     'app/models/AccountModel.php', 'app/models/InstallModel.php',
     'app/models/EmailInviteModel.php',
+    'app/models/UpdateMigrationModel.php',
+    'app/services/UpdateMigrationService.php',
     'app/services/InstallService.php', 'app/services/AuthService.php',
+    'app/services/GitHubReleaseClient.php', 'app/services/UpdatePackage.php',
+    'app/services/UpdateService.php',
     'app/services/TakeNaming.php', 'app/services/ScriptImport.php',
     'app/services/RecordingStorage.php',
     'app/models/StudioModel.php', 'app/services/StudioService.php',
     'app/services/InviteMailer.php', 'app/services/EmailInviteService.php',
-    'app/controllers/AccountController.php', 'app/controllers/StudioController.php',
+    'app/controllers/AccountController.php', 'app/controllers/UpdateController.php',
+    'app/controllers/StudioController.php',
     'app/controllers/EmailInviteController.php',
 ];
 foreach ($classes as $classFile) {
@@ -51,6 +78,7 @@ $routes = [
     'invite' => ['POST'], 'assign-voice' => ['POST'],
     'join' => ['GET', 'POST'],
     'email-invite' => ['POST'], 'email-join' => ['GET', 'POST'],
+    'update' => ['GET', 'POST'],
     'select-take' => ['POST'], 'upload' => ['POST'],
     'delete-take' => ['POST'], 'audio' => ['GET', 'HEAD'],
     'export-book' => ['GET'],
@@ -70,8 +98,8 @@ try {
         throw new HttpError(405, 'Tato metoda není pro stránku povolena.');
     }
 
-    $storage = $root . DIRECTORY_SEPARATOR . 'storage';
     $install = new InstallService($storage, $root . DIRECTORY_SEPARATOR . 'database');
+    Http::configurePublicBase($install->publicBaseUrl());
     $account = new AccountController($install);
     $installed = $install->isInstalled();
 
@@ -107,6 +135,14 @@ try {
     }
     if ($route === 'email-join') {
         $emailInviteController->join($auth);
+        exit;
+    }
+    if ($route === 'update') {
+        if ($user === null || !$user['is_admin']) {
+            throw new HttpError(404, 'Požadovaná stránka nebyla nalezena.');
+        }
+        $updates = new Dabing\UpdateService($root, $install, $applicationLock);
+        (new Dabing\UpdateController($updates))->handle($user);
         exit;
     }
     if ($route === 'join' && $user === null) {

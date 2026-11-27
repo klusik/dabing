@@ -395,3 +395,20 @@ input:focus, textarea:focus { border-color: var(--forest); outline: 3px solid rg
     .guidance-actions .icon-control, .copy-prompt { width: 44px; min-width: 44px; height: 44px; flex-basis: 44px; }
     .take-download, .take-select { width: 44px; min-width: 44px; height: 44px; flex-basis: 44px; }
 }
+
+.update-card { display: grid; gap: 14px; }
+.update-card h1 { margin: 0; font-size: 34px; }
+.update-current { margin: 0; color: var(--muted); font-size: 13px; }
+.update-release { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; padding: 13px 15px; border: 1px solid rgba(49,93,75,.14); border-radius: 12px; background: rgba(215,237,138,.18); }
+.update-release-label { color: var(--muted); font-size: 12px; }
+.update-release strong { color: var(--forest-deep); font: 700 16px var(--font-display); }
+.update-size { color: var(--muted); font-size: 11px; }
+.update-form { margin-top: 2px; }
+.update-db-details { padding-top: 12px; border-top: 1px solid var(--line); }
+.update-db-details summary { min-height: 44px; display: flex; align-items: center; color: var(--forest); font-size: 12px; font-weight: 700; cursor: pointer; }
+.update-db-details label { margin-top: 10px; }
+.update-empty { margin: 0; padding: 14px; border-radius: 11px; background: rgba(255,255,255,.55); font-size: 13px; }
+@media (max-width: 680px) {
+    .update-card h1 { font-size: 29px; }
+}
+.update-db-help { margin: -2px 0 8px; color: var(--muted); font-size: 11px; }

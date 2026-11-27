@@ -68,10 +68,10 @@ final class AuthService
             return null;
         }
         return [
-            'id' => (int) $user['id'],
-            'name' => (string) $user['name'],
-            'email' => (string) $user['email'],
-            'is_admin' => (bool) ($user['is_admin'] ?? false),
+            'id' => $account['id'],
+            'name' => $account['name'],
+            'email' => $account['email'],
+            'is_admin' => $account['is_admin'],
         ];
     }
     /** Authenticate credentials using a generic failure response.

@@ -27,8 +27,12 @@ zpracování `.htaccess`. Pro mikrofon otevřete web přes HTTPS nebo na
 
 Na WEDOSu použijte server a název databáze z administrace hostingu. Účet
 **web** patří do provozních údajů a účet **admin** poslouží k vytvoření tabulek.
-Průvodce ukládá pouze provozní údaje. Odkazy a přesměrování fungují relativně
-k veřejné adrese v kořenu domény i pod veřejnou cestou.
+Průvodce ukládá provozní údaje. Do volitelného pole **Veřejná adresa**
+zadejte adresu z prohlížeče, například `https://dabing.example.cz/` nebo
+`https://example.cz/dabing/`. U existující instalace lze stejnou adresu
+nastavit pod klíčem `base_url` v `storage/config.php`. Tato adresa se používá
+pro odkazy, styly a přesměrování. Při prázdné hodnotě používá aplikace
+relativní odkazy vyhodnocené prohlížečem.
 
 - [Dokumentace databází WEDOS](https://kb.vedos.cz/webhosting-databaze/)
 - [Dokumentace konfigurace PHP WEDOS](https://kb.vedos.cz/webhosting-php/)
@@ -140,8 +144,9 @@ pro velikost archivu.
 ## Pošta pro pozvánky
 
 Zkopírujte `config/mail.example.php` do neveřejného `storage/mail.php`.
-Nastavte `base_url` na veřejnou HTTPS adresu instalace a `from` na adresu
-odesílatele na vaší doméně. Na WEDOSu využívá aplikace PHP mail() s adresou
+Nastavte `from` na adresu odesílatele na vaší doméně. Pro odkaz pozvánky
+má přednost veřejná adresa instalace. Poštovní `base_url` slouží jako výchozí
+hodnota pro stávající instalace. Na WEDOSu využívá aplikace PHP mail() s adresou
 odesílatele pro návratovou cestu. [Nastavení pošty WEDOS](https://kb.vedos.cz/maily-blokovani/)
 
 V Laragonu lze použít Mailpit a veřejnou adresu `http://localhost/dabing/`.
@@ -149,6 +154,46 @@ Volitelné klíče `smtp_host` a `smtp_port` nastavují přímé SMTP v PHP na
 Windows. Je-li nastavený `sendmail_path`, transport vybírá tento příkaz.
 Výchozí místní Mailpit přijímá zkušební poštu na portu 1025 a ukazuje ji
 v rozhraní na portu 8025.
+
+## Aktualizace
+
+Hlavní správce otevře ikonu **Aktualizace** v horní liště. Stránka zobrazí nainstalovanou
+verzi a případné novější stabilní vydání z GitHubu. Po potvrzení stáhne ZIP,
+ověří jeho SHA-256, provede čekající DB migrace a nasadí aplikační soubory.
+Provozní instalace ukládá konfiguraci a nahrávky v chráněném adresáři
+`storage`. Pro updater potřebuje PHP rozšíření `curl` a `zip` a právo
+zápisu do adresáře aplikace.
+
+Pokud běžný DB účet nemůže měnit schéma, zadejte databázový účet s právy
+pro danou migraci v části **Databázová oprávnění**. Aplikace jej použije jen
+v tomto požadavku a připojí se ke stejnému serveru a databázi.
+
+### Balík vydání
+
+Z ověřené revize sestavte balík mimo pracovní kopii.
+
+```sh
+php scripts/build-update.php 0.1.0 ../dabing-0.1.0.zip
+```
+
+Balík `dabing-0.1.0.zip` patří jako asset ke stabilnímu vydání
+`v0.1.0` v `klusik/dabing`. Verze ve staženém balíku musí odpovídat
+tagu a GitHub musí k assetu uvádět kontrolní součet SHA-256. Archiv má jediný
+kořen `dabing/`.
+
+Migrace jsou soubory `database/migrations/0001_nazev.php`, které vracejí
+seznam SQL příkazů. Probíhají v pořadí názvů souborů. Dokončenou migraci
+identifikuje název a SHA-256 v tabulce `dabing_schema_migrations`.
+Další změnu zapište do nového souboru. SQL musí být opakovatelné a
+kompatibilní s dosavadními soubory, protože DDL může potvrdit změny před
+dokončením aktualizace.
+
+Pokud se nasazení nepodaří dokončit ani vrátit, Dabing zůstane v údržbě.
+`storage/update-recovery.json` obsahuje inventář původních a nových souborů
+a klíč pracovního adresáře pod `storage/update-work/`. Obnovte původní
+soubory z jeho `backup/`, odstraňte soubory vzniklé jen přerušenou
+aktualizací a pak odeberte značku údržby. Aplikované DB migrace eviduje
+databáze.
 
 ## Vývoj
 

@@ -45,8 +45,11 @@ final class InviteMailer
             throw new FormError('E-mailovou pozvánku nelze odeslat.');
         }
         $config = $this->mailConfig();
-        $baseUrl = rtrim($config['base_url'], '/');
-        $link = $baseUrl . '/' . Http::url('email-join', ['code' => $code]);
+        $baseUrl = Http::publicBaseUrl() ?? $config['base_url'];
+        $link = rtrim($baseUrl, '/') . '/' . Http::routeQuery(
+            'email-join',
+            ['code' => $code]
+        );
         $subject = 'Pozvanka do Dabing';
         $message = "Dobrý den,\r\n\r\n"
             . "Byli jste pozváni do soukromého projektu Dabing.\r\n"
@@ -77,18 +80,17 @@ final class InviteMailer
         } catch (Throwable $error) {
             throw new FormError('Poštovní nastavení není platné.');
         }
-        if (!is_array($config) || !isset($config['base_url'], $config['from'])
-            || !is_string($config['base_url']) || !is_string($config['from'])) {
+        if (!is_array($config) || !isset($config['from'])
+            || !is_string($config['from'])) {
             throw new FormError('Poštovní nastavení není platné.');
         }
-        $baseUrl = trim($config['base_url']);
-        $parts = parse_url($baseUrl);
-        if (preg_match('/[\r\n\x00\x5c]/', $baseUrl) === 1
-            || !is_array($parts)
-            || !isset($parts['scheme'], $parts['host'])
-            || !in_array(strtolower((string) $parts['scheme']), ['http', 'https'], true)
-            || isset($parts['user']) || isset($parts['pass'])
-            || isset($parts['query']) || isset($parts['fragment'])) {
+        $configuredBase = Http::publicBaseUrl();
+        $legacyBase = $config['base_url'] ?? null;
+        $baseUrl = $configuredBase;
+        if ($baseUrl === null && is_string($legacyBase)) {
+            $baseUrl = Http::normalizePublicBaseUrl($legacyBase);
+        }
+        if ($baseUrl === null) {
             throw new FormError('Nastavte platnou veřejnou adresu webu v poštovním nastavení.');
         }
         $sender = trim($config['from']);
