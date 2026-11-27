@@ -66,8 +66,7 @@ final class StudioService
      */
     public function createInvite(int $projectId, int $ownerId): string
     {
-        $view = $this->model->projectView($projectId, $ownerId);
-        if ($view === null || $view['project']['role'] !== 'owner') {
+        if (!$this->model->isOwner($projectId, $ownerId)) {
             throw new FormError('Pozvánku může vytvořit pouze autor projektu.');
         }
         $token = bin2hex(random_bytes(32));
@@ -76,6 +75,28 @@ final class StudioService
             ->format('Y-m-d H:i:s');
         $this->model->createInvite($projectId, hash('sha256', $token), $expires);
         return $token;
+    }
+
+    /**
+     * Apply an owner-selected character assignment or clear it.
+     *
+     * @param int $projectId Project receiving the voice assignment.
+     * @param int $ownerId Authenticated project owner.
+     * @param string $character Exact character label in the script.
+     * @param int|null $userId Member receiving the role, or null to clear.
+     * @return void No value is returned.
+     * @throws FormError When the character, member, or owner is invalid.
+     */
+    public function assignVoice(
+        int $projectId,
+        int $ownerId,
+        string $character,
+        ?int $userId
+    ): void {
+        if ($character === '') {
+            throw new FormError('Vyberte postavu ze scénáře.');
+        }
+        $this->model->assignVoice($projectId, $ownerId, $character, $userId);
     }
 
     /**
@@ -110,6 +131,9 @@ final class StudioService
         int $userId,
         array $file
     ): array {
+        if (!$this->model->canRecord($projectId, $lineId, $userId)) {
+            throw new FormError('Tato replika není přiřazena vašemu hlasu.');
+        }
         $staged = $this->storage->stage($file);
         try {
             $saved = $this->model->addRecording(

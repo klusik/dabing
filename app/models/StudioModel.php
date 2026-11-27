@@ -20,6 +20,12 @@ use PDO;
 final class StudioModel
 {
     /**
+     * Type: int; Units: lines; Scope: one rendered project page; Consumers:
+     * projectView(); Rationale: keeps the DOM and inline recording controls usable.
+     */
+    private const PROJECT_PAGE_SIZE = 80;
+
+    /**
      * Create the persistence model.
      *
      * @param PDO $database Shared configured database connection.
@@ -140,15 +146,19 @@ final class StudioModel
     }
 
     /**
-     * Fetch one project view model when the user is a member.
+     * Fetch the current project page, complete playlist, and project-wide voices.
      *
      * @param int $projectId Requested project identifier.
      * @param int $userId Authenticated viewer identifier.
-     * @return array{project:array{id:int,title:string,role:string},chapters:list<array{id:int,title:string,lines:list<array{id:int,number:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,takes:list<array{id:int,attempt_no:int,media_type:string,user_id:int,user_name:string,created_at:string,is_selected:bool}>}>}>,members:list<array{id:int,name:string,role:string}>}|null
-     *     Ordered project data, or null when access is not allowed.
+     * @param int $requestedPage One-based visible script page.
+     * @return array{project:array{id:int,title:string,role:string},chapters:list<array{id:int,title:string,lines:list<array{id:int,number:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,assigned_name:?string,can_record:bool,takes:list<array{id:int,attempt_no:int,media_type:string,user_id:int,user_name:string,created_at:string,is_selected:bool}>}>}>,members:list<array{id:int,name:string,role:string}>,voices:list<array{character:string,assigned_user_id:?int,assigned_name:?string}>,playlist:list<array{recording_id:int,line_number:int,character:string,chapter_title:string,attempt_no:int,media_type:string}>,pagination:array{page:int,pages:int,total:int}}|null
+     *     Ordered page and playback data, or null when access is not allowed.
      */
-    public function projectView(int $projectId, int $userId): ?array
-    {
+    public function projectView(
+        int $projectId,
+        int $userId,
+        int $requestedPage = 1
+    ): ?array {
         $projectQuery = $this->database->prepare(
             'SELECT p.id, p.title, p.owner_user_id,
                     CASE WHEN p.owner_user_id = :owner THEN \'owner\'
@@ -167,69 +177,105 @@ final class StudioModel
             return null;
         }
 
-        $chapterQuery = $this->database->prepare(
-            'SELECT id, title FROM dabing_project_chapters
-             WHERE project_id = ? ORDER BY position, id'
-        );
-        $chapterQuery->execute([$projectId]);
-        $chapterRows = $chapterQuery->fetchAll(PDO::FETCH_ASSOC);
-        $chapters = [];
-        $globalLineNumber = 0;
-        $lineQuery = $this->database->prepare(
-            'SELECT l.id, l.position, l.character_name, l.text,
-                    l.selected_recording_id, selected.user_id AS selected_user_id,
-                    r.id AS recording_id, r.user_id AS recording_user_id,
-                    r.attempt_no, r.media_type,
-                    u.name AS user_name, r.created_at
+        $totalQuery = $this->database->prepare(
+            'SELECT COUNT(*)
              FROM dabing_script_lines l
-             LEFT JOIN dabing_recordings selected
-               ON selected.id = l.selected_recording_id AND selected.line_id = l.id
-             LEFT JOIN dabing_recordings r ON r.line_id = l.id
-             LEFT JOIN dabing_users u ON u.id = r.user_id
-             WHERE l.chapter_id = :chapter
-             ORDER BY l.position, l.id, r.created_at, r.id'
+             JOIN dabing_project_chapters c ON c.id = l.chapter_id
+             WHERE c.project_id = ?'
         );
-        foreach ($chapterRows as $chapterRow) {
-            $lineQuery->execute(['chapter' => (int) $chapterRow['id']]);
-            $lineRows = $lineQuery->fetchAll(PDO::FETCH_ASSOC);
-            $lines = [];
-            foreach ($lineRows as $row) {
-                $lineId = (int) $row['id'];
-                $lineIndex = count($lines) - 1;
-                if ($lineIndex < 0 || $lines[$lineIndex]['id'] !== $lineId) {
-                    ++$globalLineNumber;
-                    $lines[] = [
-                        'id' => $lineId,
-                        'number' => $globalLineNumber,
-                        'position' => (int) $row['position'],
-                        'character' => (string) $row['character_name'],
-                        'text' => (string) $row['text'],
-                        'selected_recording_id' => $row['selected_recording_id'] === null
-                            ? null : (int) $row['selected_recording_id'],
-                        'selected_recording_user_id' => $row['selected_user_id'] === null
-                            ? null : (int) $row['selected_user_id'],
-                        'takes' => [],
-                    ];
-                    $lineIndex = count($lines) - 1;
-                }
-                if ($row['recording_id'] !== null) {
-                    $lines[$lineIndex]['takes'][] = [
-                        'id' => (int) $row['recording_id'],
-                        'attempt_no' => (int) $row['attempt_no'],
-                        'media_type' => (string) $row['media_type'],
-                        'user_id' => (int) $row['recording_user_id'],
-                        'user_name' => (string) $row['user_name'],
-                        'created_at' => (string) $row['created_at'],
-                        'is_selected' => (int) $row['recording_id']
-                            === (int) ($row['selected_recording_id'] ?? 0),
-                    ];
-                }
+        $totalQuery->execute([$projectId]);
+        $totalLines = (int) $totalQuery->fetchColumn();
+        $pages = max(1, (int) ceil($totalLines / self::PROJECT_PAGE_SIZE));
+        $page = max(1, min($requestedPage, $pages));
+        $offset = ($page - 1) * self::PROJECT_PAGE_SIZE;
+
+        $lineQuery = $this->database->prepare(
+            'SELECT page_line.id, page_line.position, page_line.number,
+                    page_line.chapter_id, page_line.chapter_title,
+                    page_line.chapter_position, page_line.character_name,
+                    page_line.text, page_line.selected_recording_id,
+                    selected.user_id AS selected_user_id,
+                    r.id AS recording_id, r.attempt_no, r.media_type,
+                    r.user_id AS recording_user_id, u.name AS user_name,
+                    r.created_at
+             FROM (
+                 SELECT l.id, l.position, l.chapter_id, l.character_name,
+                        l.text, l.selected_recording_id,
+                        c.title AS chapter_title, c.position AS chapter_position,
+                        (SELECT COUNT(*)
+                         FROM dabing_project_chapters prior_chapter
+                         JOIN dabing_script_lines prior_line
+                           ON prior_line.chapter_id = prior_chapter.id
+                         WHERE prior_chapter.project_id = c.project_id
+                           AND (prior_chapter.position < c.position
+                             OR (prior_chapter.position = c.position
+                               AND (prior_line.position < l.position
+                                 OR (prior_line.position = l.position
+                                   AND prior_line.id <= l.id))))) AS number
+                 FROM dabing_script_lines l
+                 JOIN dabing_project_chapters c ON c.id = l.chapter_id
+                 WHERE c.project_id = :project
+                 ORDER BY c.position, c.id, l.position, l.id
+                 LIMIT :page_size OFFSET :page_offset
+             ) page_line
+             LEFT JOIN dabing_recordings selected
+               ON selected.id = page_line.selected_recording_id
+              AND selected.line_id = page_line.id
+             LEFT JOIN dabing_recordings r ON r.line_id = page_line.id
+             LEFT JOIN dabing_users u ON u.id = r.user_id
+             ORDER BY page_line.chapter_position, page_line.chapter_id,
+                      page_line.position, page_line.id, r.attempt_no'
+        );
+        $lineQuery->bindValue('project', $projectId, PDO::PARAM_INT);
+        $lineQuery->bindValue('page_size', self::PROJECT_PAGE_SIZE, PDO::PARAM_INT);
+        $lineQuery->bindValue('page_offset', $offset, PDO::PARAM_INT);
+        $lineQuery->execute();
+        $chapters = [];
+        $chapterIndexes = [];
+        $lineIndexes = [];
+        foreach ($lineQuery->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $chapterId = (int) $row['chapter_id'];
+            if (!isset($chapterIndexes[$chapterId])) {
+                $chapterIndexes[$chapterId] = count($chapters);
+                $chapters[] = [
+                    'id' => $chapterId,
+                    'title' => (string) $row['chapter_title'],
+                    'lines' => [],
+                ];
             }
-            $chapters[] = [
-                'id' => (int) $chapterRow['id'],
-                'title' => (string) $chapterRow['title'],
-                'lines' => $lines,
-            ];
+            $chapterIndex = $chapterIndexes[$chapterId];
+            $lineId = (int) $row['id'];
+            $lineKey = (string) $lineId;
+            if (!isset($lineIndexes[$lineKey])) {
+                $lineIndexes[$lineKey] = count($chapters[$chapterIndex]['lines']);
+                $chapters[$chapterIndex]['lines'][] = [
+                    'id' => $lineId,
+                    'number' => (int) $row['number'],
+                    'position' => (int) $row['position'],
+                    'character' => (string) $row['character_name'],
+                    'text' => (string) $row['text'],
+                    'selected_recording_id' => $row['selected_recording_id'] === null
+                        ? null : (int) $row['selected_recording_id'],
+                    'selected_recording_user_id' => $row['selected_user_id'] === null
+                        ? null : (int) $row['selected_user_id'],
+                    'assigned_name' => null,
+                    'can_record' => true,
+                    'takes' => [],
+                ];
+            }
+            $lineIndex = $lineIndexes[$lineKey];
+            if ($row['recording_id'] !== null) {
+                $chapters[$chapterIndex]['lines'][$lineIndex]['takes'][] = [
+                    'id' => (int) $row['recording_id'],
+                    'attempt_no' => (int) $row['attempt_no'],
+                    'media_type' => (string) $row['media_type'],
+                    'user_id' => (int) $row['recording_user_id'],
+                    'user_name' => (string) $row['user_name'],
+                    'created_at' => (string) $row['created_at'],
+                    'is_selected' => (int) $row['recording_id']
+                        === (int) ($row['selected_recording_id'] ?? 0),
+                ];
+            }
         }
 
         $membersQuery = $this->database->prepare(
@@ -247,6 +293,86 @@ final class StudioModel
             'role' => (string) $row['role'],
         ], $membersQuery->fetchAll(PDO::FETCH_ASSOC));
 
+        $assignmentQuery = $this->database->prepare(
+            'SELECT a.character_name, a.user_id, u.name AS assigned_name
+             FROM dabing_voice_assignments a
+             JOIN dabing_users u ON u.id = a.user_id
+             WHERE a.project_id = ? ORDER BY a.character_name'
+        );
+        $assignmentQuery->execute([$projectId]);
+        $assignments = [];
+        foreach ($assignmentQuery->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $assignments[bin2hex((string) $row['character_name'])] = [
+                'assigned_user_id' => (int) $row['user_id'],
+                'assigned_name' => (string) $row['assigned_name'],
+            ];
+        }
+
+        $rolesQuery = $this->database->prepare(
+            'SELECT l.id, l.character_name
+             FROM dabing_script_lines l
+             JOIN dabing_project_chapters c ON c.id = l.chapter_id
+             WHERE c.project_id = ? ORDER BY c.position, c.id, l.position, l.id'
+        );
+        $rolesQuery->execute([$projectId]);
+        $lineNumbers = [];
+        $voicesByName = [];
+        $lineNumber = 0;
+        foreach ($rolesQuery->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            ++$lineNumber;
+            $lineNumbers[(string) $row['id']] = $lineNumber;
+            $character = (string) $row['character_name'];
+            $voiceKey = bin2hex($character);
+            $assignment = $assignments[$voiceKey] ?? [
+                'assigned_user_id' => null,
+                'assigned_name' => null,
+            ];
+            $voicesByName[$voiceKey] ??= [
+                'character' => $character,
+                'assigned_user_id' => $assignment['assigned_user_id'],
+                'assigned_name' => $assignment['assigned_name'],
+            ];
+        }
+
+        $isOwner = (int) $projectRow['owner_user_id'] === $userId;
+        foreach ($chapters as &$chapter) {
+            foreach ($chapter['lines'] as &$line) {
+                $assignment = $assignments[bin2hex($line['character'])] ?? [
+                    'assigned_user_id' => null,
+                    'assigned_name' => null,
+                ];
+                $line['assigned_name'] = $assignment['assigned_name'];
+                $line['can_record'] = $isOwner
+                    || $assignment['assigned_user_id'] === null
+                    || $assignment['assigned_user_id'] === $userId;
+            }
+            unset($line);
+        }
+        unset($chapter);
+
+        $playlistQuery = $this->database->prepare(
+            'SELECT r.id AS recording_id, l.id AS line_id,
+                    l.character_name, c.title AS chapter_title,
+                    r.attempt_no, r.media_type
+             FROM dabing_script_lines l
+             JOIN dabing_project_chapters c ON c.id = l.chapter_id
+             JOIN dabing_recordings r
+               ON r.id = l.selected_recording_id AND r.line_id = l.id
+             WHERE c.project_id = ? ORDER BY c.position, c.id, l.position, l.id'
+        );
+        $playlistQuery->execute([$projectId]);
+        $playlist = [];
+        foreach ($playlistQuery->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $playlist[] = [
+                'recording_id' => (int) $row['recording_id'],
+                'line_number' => $lineNumbers[(string) $row['line_id']],
+                'character' => (string) $row['character_name'],
+                'chapter_title' => (string) $row['chapter_title'],
+                'attempt_no' => (int) $row['attempt_no'],
+                'media_type' => (string) $row['media_type'],
+            ];
+        }
+
         return [
             'project' => [
                 'id' => (int) $projectRow['id'],
@@ -255,11 +381,18 @@ final class StudioModel
             ],
             'chapters' => $chapters,
             'members' => $members,
+            'voices' => array_values($voicesByName),
+            'playlist' => $playlist,
+            'pagination' => [
+                'page' => $page,
+                'pages' => $pages,
+                'total' => $totalLines,
+            ],
         ];
     }
 
     /**
-     * Insert a one-time invitation hash with expiration.
+     * Insert a one-time invitation hash with expiration. with expiration.
      *
      * @param int $projectId Project receiving a collaborator.
      * @param string $tokenHash SHA-256 digest of the raw invitation token.
@@ -404,6 +537,112 @@ final class StudioModel
     }
 
     /**
+     * Check whether a project member may record a line under voice assignment.
+     *
+     * @param int $projectId Requested project.
+     * @param int $lineId Requested script line.
+     * @param int $userId Authenticated user.
+     * @return bool True for the owner, the assigned member, or an unassigned role.
+     */
+    public function canRecord(int $projectId, int $lineId, int $userId): bool
+    {
+        $statement = $this->database->prepare(
+            'SELECT p.owner_user_id, a.user_id AS assigned_user_id
+             FROM dabing_script_lines l
+             JOIN dabing_project_chapters c ON c.id = l.chapter_id
+             JOIN dabing_projects p ON p.id = c.project_id
+             JOIN dabing_project_members m ON m.project_id = p.id
+             LEFT JOIN dabing_voice_assignments a
+               ON a.project_id = p.id
+              AND CAST(a.character_name AS BINARY)
+                  = CAST(l.character_name AS BINARY)
+             WHERE p.id = ? AND l.id = ? AND m.user_id = ?'
+        );
+        $statement->execute([$projectId, $lineId, $userId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return false;
+        }
+        return (int) $row['owner_user_id'] === $userId
+            || $row['assigned_user_id'] === null
+            || (int) $row['assigned_user_id'] === $userId;
+    }
+
+    /**
+     * Assign or clear one exact script character for a project owner.
+     *
+     * @param int $projectId Requested project.
+     * @param int $ownerId Authenticated project owner.
+     * @param string $character Exact character label from the script.
+     * @param int|null $userId Member receiving the assignment, or null to clear.
+     * @return void No value is returned.
+     * @throws FormError When owner, character, or member validation fails.
+     */
+    public function assignVoice(
+        int $projectId,
+        int $ownerId,
+        string $character,
+        ?int $userId
+    ): void {
+        $this->database->beginTransaction();
+        try {
+            $owner = $this->database->prepare(
+                'SELECT id FROM dabing_projects
+                 WHERE id = ? AND owner_user_id = ?'
+            );
+            $owner->execute([$projectId, $ownerId]);
+            if ($owner->fetchColumn() === false) {
+                throw new FormError('Obsazení může upravit pouze autor knihy.');
+            }
+
+            $roles = $this->database->prepare(
+                'SELECT l.id
+                 FROM dabing_script_lines l
+                 JOIN dabing_project_chapters c ON c.id = l.chapter_id
+                 WHERE c.project_id = ?
+                   AND CAST(l.character_name AS BINARY) = CAST(? AS BINARY)
+                 ORDER BY l.id FOR UPDATE'
+            );
+            $roles->execute([$projectId, $character]);
+            if ($roles->fetchAll(PDO::FETCH_COLUMN) === []) {
+                throw new FormError('Tato postava v knize nemá žádné repliky.');
+            }
+
+            if ($userId !== null) {
+                $member = $this->database->prepare(
+                    'SELECT 1 FROM dabing_project_members
+                     WHERE project_id = ? AND user_id = ?'
+                );
+                $member->execute([$projectId, $userId]);
+                if ($member->fetchColumn() === false) {
+                    throw new FormError('Obsazení musí vybrat člena této knihy.');
+                }
+                $assignment = $this->database->prepare(
+                    'INSERT INTO dabing_voice_assignments
+                        (project_id, character_name, user_id)
+                     VALUES (?, ?, ?)
+                     ON DUPLICATE KEY UPDATE user_id = VALUES(user_id),
+                         assigned_at = CURRENT_TIMESTAMP'
+                );
+                $assignment->execute([$projectId, $character, $userId]);
+            } else {
+                $clear = $this->database->prepare(
+                    'DELETE FROM dabing_voice_assignments
+                     WHERE project_id = ?
+                       AND CAST(character_name AS BINARY) = CAST(? AS BINARY)'
+                );
+                $clear->execute([$projectId, $character]);
+            }
+            $this->database->commit();
+        } catch (\Throwable $exception) {
+            if ($this->database->inTransaction()) {
+                $this->database->rollBack();
+            }
+            throw $exception;
+        }
+    }
+
+    /**
      * Append a new attempt after locking the authorized script line.
      *
      * @param int $projectId Project scope for authorization.
@@ -426,7 +665,9 @@ final class StudioModel
         $this->database->beginTransaction();
         try {
             $access = $this->database->prepare(
-                'SELECT p.title, c.project_id, c.position AS chapter_position,
+                'SELECT p.title, p.owner_user_id,
+                        a.user_id AS assigned_user_id,
+                        c.project_id, c.position AS chapter_position,
                         l.position AS line_position,
                         (SELECT COUNT(*)
                          FROM dabing_project_chapters prior_chapter
@@ -440,6 +681,10 @@ final class StudioModel
                  JOIN dabing_project_chapters c ON c.id = l.chapter_id
                  JOIN dabing_projects p ON p.id = c.project_id
                  JOIN dabing_project_members m ON m.project_id = p.id
+                 LEFT JOIN dabing_voice_assignments a
+                   ON a.project_id = p.id
+                  AND CAST(a.character_name AS BINARY)
+                      = CAST(l.character_name AS BINARY)
                  WHERE p.id = ? AND l.id = ? AND m.user_id = ?
                  FOR UPDATE'
             );
@@ -447,6 +692,11 @@ final class StudioModel
             $line = $access->fetch(PDO::FETCH_ASSOC);
             if (!is_array($line)) {
                 throw new FormError('K této replice nemáte přístup.');
+            }
+            if ((int) $line['owner_user_id'] !== $userId
+                && $line['assigned_user_id'] !== null
+                && (int) $line['assigned_user_id'] !== $userId) {
+                throw new FormError('Tato postava je přiřazena jinému hlasu.');
             }
 
             $lastAttempt = $this->database->prepare(

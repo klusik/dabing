@@ -98,5 +98,19 @@ CREATE TABLE IF NOT EXISTS dabing_recordings (
         ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS dabing_voice_assignments (
+    project_id INT UNSIGNED NOT NULL,
+    character_name VARCHAR(100)
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    user_id INT UNSIGNED NOT NULL,
+    assigned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (project_id, character_name),
+    KEY idx_dabing_voice_assignments_member (project_id, user_id),
+    CONSTRAINT fk_dabing_voice_assignments_member
+        FOREIGN KEY (project_id, user_id)
+        REFERENCES dabing_project_members (project_id, user_id)
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- selected_recording_id is checked against the same line in every read/write query;
 -- keeping it unconstrained avoids a circular table dependency and allows retry-safe installs.

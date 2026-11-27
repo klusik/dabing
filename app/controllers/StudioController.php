@@ -105,7 +105,11 @@ final class StudioController
         if ($projectId === null) {
             throw new HttpError(404, 'Kniha nebyla nalezena.');
         }
-        $view = $this->model->projectView($projectId, $this->userId());
+        $view = $this->model->projectView(
+            $projectId,
+            $this->userId(),
+            Http::queryId('page') ?? 1
+        );
         if ($view === null) {
             throw new HttpError(404, 'Kniha nebyla nalezena.');
         }
@@ -131,6 +135,22 @@ final class StudioController
             unset($line);
         }
         unset($chapter);
+        foreach ($view['playlist'] as &$track) {
+            $track['file_name'] = TakeNaming::fileName(
+                $view['project']['title'],
+                $track['line_number'],
+                $track['attempt_no'],
+                $track['media_type']
+            );
+            $track['audio_url'] = Http::url(
+                'audio', ['id' => $track['recording_id']]
+            );
+            $track['download_url'] = Http::url('audio', [
+                'id' => $track['recording_id'],
+                'download' => 1,
+            ]);
+        }
+        unset($track);
         $view['can_invite'] = $view['project']['role'] === 'owner';
         $view['invite_url'] = null;
         if (session_status() === PHP_SESSION_ACTIVE) {
@@ -209,7 +229,58 @@ final class StudioController
             $_SESSION['studio_invite_url'] = $url;
         }
         Http::notice('success', 'Jednorázový odkaz k pozvánce je připraven.');
-        Http::redirect('project', ['id' => $projectId]);
+        Http::redirect('project', [
+            'id' => $projectId,
+            'page' => Http::postId('page') ?? 1,
+        ]);
+    }
+
+    /**
+     * Assign or clear one script character for a project member.
+     *
+     * @return void No value is returned.
+     */
+    public function assignVoice(): void
+    {
+        if (Http::method() !== 'POST') {
+            throw new HttpError(405, 'Metoda není podporována.');
+        }
+        Http::requireCsrf();
+        $projectId = Http::queryId('id');
+        if ($projectId === null) {
+            throw new HttpError(404, 'Kniha nebyla nalezena.');
+        }
+        $page = Http::postId('page') ?? 1;
+        $userId = $this->userId();
+        if (!$this->model->isOwner($projectId, $userId)) {
+            throw new HttpError(403, 'Obsazení může upravit pouze autor knihy.');
+        }
+        $character = Http::post('character');
+        $targetValue = Http::post('user_id');
+        $targetUserId = null;
+        if ($targetValue !== '' && $targetValue !== '0') {
+            $targetUserId = Http::postId('user_id');
+            if ($targetUserId === null) {
+                Http::notice('error', 'Vyberte platného člena knihy.');
+                Http::redirect('project', ['id' => $projectId, 'page' => $page]);
+            }
+        }
+        try {
+            $this->service->assignVoice(
+                $projectId,
+                $userId,
+                $character,
+                $targetUserId
+            );
+        } catch (FormError $error) {
+            Http::notice('error', $error->getMessage());
+            Http::redirect('project', ['id' => $projectId, 'page' => $page]);
+        }
+        Http::notice('success', 'Obsazení postavy bylo aktualizováno.');
+        Http::redirect('project', [
+            'id' => $projectId,
+            'page' => $page,
+        ]);
     }
 
     /**
@@ -252,6 +323,7 @@ final class StudioController
         }
         Http::requireCsrf();
         $projectId = Http::queryId('id');
+        $page = Http::postId('page') ?? 1;
         $lineId = Http::postId('line_id');
         $recordingId = Http::postId('recording_id');
         if ($projectId === null || $lineId === null || $recordingId === null
@@ -263,7 +335,7 @@ final class StudioController
             )) {
             throw new HttpError(403, 'Tento záznam nelze vybrat.');
         }
-        Http::redirect('project', ['id' => $projectId]);
+        Http::redirect('project', ['id' => $projectId, 'page' => $page]);
     }
 
     /**

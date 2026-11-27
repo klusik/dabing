@@ -37,9 +37,9 @@ final class ScriptImport
 
     /**
      * Type: int; Units: lines; Scope: one imported script; Consumers:
-     * validate(); Rationale: bounds rows and resulting studio rendering.
+     * validate(); Rationale: matches the four-digit global filename ordinal.
      */
-    private const MAX_LINES = 1000;
+    private const MAX_LINES = TakeNaming::MAX_LINE_NUMBER;
 
     /**
      * Type: int; Units: UTF-8 characters; Scope: each title; Consumers:
@@ -126,7 +126,8 @@ final class ScriptImport
                 $lineLocation = $location . ', replika ' . ($lineIndex + 1);
                 if ($lineCount > self::MAX_LINES) {
                     throw new FormError(
-                        $lineLocation . ': scénář překračuje limit 1000 replik.'
+                        $lineLocation . ': scénář překračuje limit '
+                        . self::MAX_LINES . ' replik.'
                     );
                 }
                 if (!($line instanceof \stdClass)) {
