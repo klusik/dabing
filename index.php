@@ -53,6 +53,7 @@ $routes = [
     'email-invite' => ['POST'], 'email-join' => ['GET', 'POST'],
     'select-take' => ['POST'], 'upload' => ['POST'],
     'delete-take' => ['POST'], 'audio' => ['GET', 'HEAD'],
+    'export-book' => ['GET'],
 ];
 $route = Http::query('route');
 $route = $route === '' ? 'projects' : $route;
@@ -123,6 +124,9 @@ try {
         if ($route === 'audio') {
             throw new HttpError(404, 'Nahrávka nebyla nalezena.');
         }
+        if ($route === 'export-book') {
+            throw new HttpError(404, 'Kniha nebyla nalezena.');
+        }
         if ($route === 'upload') {
             Http::json(['ok' => false, 'message' => 'Přihlášení vypršelo.'], 401);
         }
@@ -167,6 +171,9 @@ try {
             break;
         case 'audio':
             $studio->audio();
+            break;
+        case 'export-book':
+            $studio->exportBook();
             break;
         default:
             throw new HttpError(404, 'Požadovaná stránka nebyla nalezena.');

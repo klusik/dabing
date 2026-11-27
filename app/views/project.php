@@ -19,6 +19,9 @@ $canInvite = (bool) ($data['can_invite'] ?? false);
 $voices = is_array($data['voices'] ?? null) ? $data['voices'] : [];
 $pagination = is_array($data['pagination'] ?? null) ? $data['pagination'] : ['page' => 1, 'pages' => 1, 'total' => 0];
 $playlist = is_array($data['playlist'] ?? null) ? $data['playlist'] : [];
+$exportUrl = (string) ($data['export_url']
+    ?? Http::url('export-book', ['id' => (int) ($project['id'] ?? 0)]));
+$hasRecordings = (bool) ($data['has_recordings'] ?? false);
 ?>
 <section class="workspace-heading">
     <div class="workspace-title"><a class="back-link" href="<?= Http::escape(Http::url('projects')) ?>" title="Moje knihy" aria-label="Zpět na moje knihy">←<span class="sr-only">Zpět na moje knihy</span></a><p class="eyebrow"><span class="eyebrow-dot"></span> <?= (($project['role'] ?? '') === 'owner' ? 'Autor' : 'Spolupracovník') ?> · soukromé studio</p><h1><?= Http::escape((string) ($project['title'] ?? 'Audiokniha')) ?></h1></div>
@@ -58,7 +61,45 @@ $playlist = is_array($data['playlist'] ?? null) ? $data['playlist'] : [];
         <div class="member-stack" aria-label="Členové projektu"><?php foreach (array_slice($members, 0, 4) as $member): ?><span class="member-avatar" title="<?= Http::escape((string) $member['name']) ?>"><?= Http::escape((preg_match('/\\A./us', (string) $member['name'], $initial) === 1 ? strtoupper($initial[0]) : 'D')) ?></span><?php endforeach; ?><span class="member-count"><?= count($members) ?> <?= count($members) === 1 ? 'hlas' : (count($members) >= 2 && count($members) < 5 ? 'hlasy' : 'hlasů') ?></span></div>
     </div>
 </section>
-<section class="studio-toolbar" data-project-id="<?= Http::escape((string) $project['id']) ?>"><div class="studio-summary"><span class="live-dot"></span><span><?= count($chapters) ?> <?= count($chapters) === 1 ? 'kapitola' : (count($chapters) >= 2 && count($chapters) < 5 ? 'kapitoly' : 'kapitol') ?></span><span id="recording-help" class="sr-only">Mikrofon bude vyžádán po stisknutí tlačítka pro nahrávání.</span></div><a class="icon-control" href="#poslech" title="Přejít k poslechu" aria-label="Přejít k poslechu"><span aria-hidden="true">↓</span></a></section>
+<section
+    class="studio-toolbar"
+    data-project-id="<?= Http::escape((string) $project['id']) ?>"
+>
+    <div class="studio-summary">
+        <span class="live-dot"></span>
+        <span>
+            <?= count($chapters) ?>
+            <?= count($chapters) === 1
+                ? 'kapitola'
+                : (count($chapters) >= 2 && count($chapters) < 5
+                    ? 'kapitoly'
+                    : 'kapitol') ?>
+        </span>
+        <span id="recording-help" class="sr-only">
+            Mikrofon bude vyžádán po stisknutí tlačítka pro nahrávání.
+        </span>
+    </div>
+    <div class="studio-toolbar-actions">
+        <a
+            class="icon-control"
+            href="#poslech"
+            title="Přejít k poslechu"
+            aria-label="Přejít k poslechu"
+        >
+            <span aria-hidden="true">↓</span>
+        </a>
+        <?php if ($hasRecordings): ?>
+            <a
+                class="icon-control zip-export-control"
+                href="<?= Http::escape($exportUrl) ?>"
+                title="Stáhnout všechny nahrávky jako ZIP"
+                aria-label="Stáhnout všechny nahrávky jako ZIP"
+            >
+                <span class="zip-export-glyph" aria-hidden="true">ZIP</span>
+            </a>
+        <?php endif; ?>
+    </div>
+</section>
 <?php if ((int) ($pagination['pages'] ?? 1) > 1): ?>
     <nav class="script-pagination" aria-label="Stránkování scénáře">
         <?php if ((int) ($pagination['page'] ?? 1) > 1): ?>

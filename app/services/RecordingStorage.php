@@ -9,7 +9,7 @@ namespace Dabing;
  * File: app/services/RecordingStorage.php
  * Module Type: Service
  * Purpose: Safely stage and serve private audio recordings.
- * Responsibilities: Validate uploads, derive retry-safe keys, manage pending deletes, and stream audio.
+ * Responsibilities: Validate uploads, manage pending files and ZIPs, and stream audio.
  * Author: Rudolf Klusal
  * License: All rights reserved.
  */
@@ -34,6 +34,13 @@ final class RecordingStorage
      * Consumers: stage(); Rationale: keep each complete storage key unpredictable.
      */
     private const RANDOM_SUFFIX_BYTES = 16;
+
+    /**
+     * Type: int; Units: random bytes; Scope: one temporary archive key;
+     * Consumers: createExportArchive(), removeExportArchive();
+     * Rationale: 32 hexadecimal characters make unguessable ZIP names.
+     */
+    private const EXPORT_ARCHIVE_KEY_BYTES = 16;
 
 
 
@@ -176,6 +183,84 @@ final class RecordingStorage
             return $offset + $frameLength <= $size;
         } finally {
             fclose($stream);
+        }
+    }
+
+    /**
+     * Create a private temporary ZIP file for one book export.
+     *
+     * @return array{key:string,path:string} Random archive key and private path.
+     * @throws HttpError When private export storage cannot be created.
+     */
+    public function createExportArchive(): array
+    {
+        $root = rtrim($this->storageDirectory, DIRECTORY_SEPARATOR)
+            . DIRECTORY_SEPARATOR . 'recordings' . DIRECTORY_SEPARATOR . 'exports';
+        if (!is_dir($root) && !mkdir($root, 0700, true) && !is_dir($root)) {
+            throw new HttpError(500, 'Soukromé úložiště exportu není dostupné.');
+        }
+        $key = bin2hex(random_bytes(self::EXPORT_ARCHIVE_KEY_BYTES));
+        $path = $root . DIRECTORY_SEPARATOR . $key . '.zip';
+        $stream = @fopen($path, 'x+b');
+        if (!is_resource($stream)) {
+            throw new HttpError(500, 'Dočasný archiv nelze vytvořit.');
+        }
+        fclose($stream);
+        if (!chmod($path, 0600)) {
+            @unlink($path);
+            throw new HttpError(500, 'Dočasný archiv nelze zabezpečit.');
+        }
+        return ['key' => $key, 'path' => $path];
+    }
+
+    /**
+     * Resolve a take path with a verified persisted byte count.
+     *
+     * @param string $storageKey Authorized take storage key.
+     * @param int $expectedBytes Database byte count for the take.
+     * @return string|null Readable private canonical or pending path, or null.
+     */
+    public function readablePath(string $storageKey, int $expectedBytes): ?string
+    {
+        if (preg_match('/\A[a-f0-9]{64}\z/D', $storageKey) !== 1
+            || $expectedBytes < 1) {
+            return null;
+        }
+        foreach ([$this->path($storageKey), $this->pendingPath($storageKey)] as $path) {
+            if (is_link($path) || !is_file($path)) {
+                continue;
+            }
+            $stream = @fopen($path, 'rb');
+            if (!is_resource($stream)) {
+                continue;
+            }
+            $metadata = fstat($stream);
+            fclose($stream);
+            if (is_array($metadata)
+                && (int) ($metadata['size'] ?? -1) === $expectedBytes) {
+                return $path;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Remove a private temporary ZIP file after delivery or a failed build.
+     *
+     * @param string $key Random archive key returned by createExportArchive().
+     * @return void No value is returned.
+     */
+    public function removeExportArchive(string $key): void
+    {
+        if (strlen($key) !== self::EXPORT_ARCHIVE_KEY_BYTES * 2
+            || preg_match('/\A[a-f0-9]+\z/D', $key) !== 1) {
+            return;
+        }
+        $path = rtrim($this->storageDirectory, DIRECTORY_SEPARATOR)
+            . DIRECTORY_SEPARATOR . 'recordings' . DIRECTORY_SEPARATOR
+            . 'exports' . DIRECTORY_SEPARATOR . $key . '.zip';
+        if (is_link($path) || is_file($path)) {
+            @unlink($path);
         }
     }
 

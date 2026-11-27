@@ -261,6 +261,135 @@ final class StudioService
     }
 
     /**
+     * Build one private ZIP containing all saved takes in global script order.
+     *
+     * @param int $projectId Project requested for export.
+     * @param int $userId Authenticated project owner or member.
+     * @return array{stream:resource,size:int,file_name:string,key:string}|null Ready archive, or null when access is denied.
+     * @throws FormError When the authorized book has no saved takes.
+     * @throws HttpError When ZIP or archive storage fails.
+     */
+    public function createBookArchive(int $projectId, int $userId): ?array
+    {
+        $book = $this->model->exportTakes($projectId, $userId);
+        if ($book === null) {
+            return null;
+        }
+        if (!class_exists(\ZipArchive::class)) {
+            throw new HttpError(503, 'Export ZIP není na serveru dostupný.');
+        }
+
+        $temporary = $this->storage->createExportArchive();
+        $key = $temporary['key'];
+        $archive = new \ZipArchive();
+        $archiveOpen = false;
+        $stream = null;
+        register_shutdown_function(function () use ($key): void {
+            $this->storage->removeExportArchive($key);
+        });
+        try {
+            $opened = $archive->open(
+                $temporary['path'],
+                \ZipArchive::CREATE | \ZipArchive::OVERWRITE
+            );
+            if ($opened !== true) {
+                throw new HttpError(500, 'Archiv knihy nelze připravit.');
+            }
+            $archiveOpen = true;
+            $entryCount = 0;
+            foreach ($book['takes'] as $take) {
+                try {
+                    $entryName = TakeNaming::fileName(
+                        $book['title'],
+                        $take['line_number'],
+                        $take['attempt_no'],
+                        $take['media_type']
+                    );
+                } catch (FormError) {
+                    throw new HttpError(500, 'Název některé nahrávky není platný.');
+                }
+                $sourcePath = $this->storage->readablePath(
+                    $take['storage_key'],
+                    $take['byte_size']
+                );
+                if ($sourcePath === null) {
+                    throw new HttpError(
+                        409,
+                        'Některá nahrávka se během přípravy změnila. Zkuste export znovu.'
+                    );
+                }
+                if (!$archive->addFile($sourcePath, $entryName)) {
+                    throw new HttpError(
+                        409,
+                        'Některá nahrávka se během přípravy změnila. Zkuste export znovu.'
+                    );
+                }
+                if (!$archive->setCompressionName(
+                    $entryName,
+                    \ZipArchive::CM_STORE
+                )) {
+                    throw new HttpError(500, 'Archiv knihy nelze připravit.');
+                }
+                ++$entryCount;
+            }
+            if ($entryCount === 0) {
+                throw new FormError('Kniha zatím neobsahuje žádné nahrávky.');
+            }
+            $closed = $archive->close();
+            $archiveOpen = false;
+            if (!$closed) {
+                throw new HttpError(
+                    500,
+                    'ZIP archiv se nepodařilo dokončit. Zkuste export znovu.'
+                );
+            }
+            $size = filesize($temporary['path']);
+            if (!is_int($size) || $size < 1 || !chmod($temporary['path'], 0600)) {
+                throw new HttpError(500, 'Archiv knihy nelze dokončit.');
+            }
+            $stream = @fopen($temporary['path'], 'rb');
+            if (!is_resource($stream)) {
+                throw new HttpError(500, 'Archiv knihy nelze přečíst.');
+            }
+            return [
+                'stream' => $stream,
+                'size' => $size,
+                'file_name' => TakeNaming::archiveFileName($book['title']),
+                'key' => $key,
+            ];
+        } catch (\Throwable $exception) {
+            unset($book);
+            if ($archiveOpen) {
+                $archive->unchangeAll();
+                $archive->close();
+            }
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+            $this->storage->removeExportArchive($key);
+            throw $exception;
+        }
+    }
+
+    /**
+     * Close the ZIP stream and remove its private temporary file.
+     *
+     * @param resource $stream Completed ZIP file stream.
+     * @param string $key Random archive key.
+     * @return void No value is returned.
+     */
+    public function closeBookArchive($stream, string $key): void
+    {
+        try {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+        } finally {
+            $this->storage->removeExportArchive($key);
+        }
+    }
+
+    /**
      * Prepare authorized audio file metadata and open the private stream.
      *
      * @param int $recordingId Requested recording.
