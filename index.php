@@ -18,6 +18,8 @@ use Dabing\AuthService;
 use Dabing\FormError;
 use Dabing\Http;
 use Dabing\HttpError;
+use Dabing\EmailInviteController;
+use Dabing\EmailInviteService;
 use Dabing\InstallService;
 use Dabing\StudioController;
 
@@ -25,11 +27,14 @@ $root = __DIR__;
 $classes = [
     'app/HttpError.php', 'app/FormError.php', 'app/Http.php',
     'app/models/AccountModel.php', 'app/models/InstallModel.php',
+    'app/models/EmailInviteModel.php',
     'app/services/InstallService.php', 'app/services/AuthService.php',
-    'app/services/ScriptImport.php', 'app/services/RecordingStorage.php',
-    'app/services/TakeNaming.php',
+    'app/services/TakeNaming.php', 'app/services/ScriptImport.php',
+    'app/services/RecordingStorage.php',
     'app/models/StudioModel.php', 'app/services/StudioService.php',
+    'app/services/InviteMailer.php', 'app/services/EmailInviteService.php',
     'app/controllers/AccountController.php', 'app/controllers/StudioController.php',
+    'app/controllers/EmailInviteController.php',
 ];
 foreach ($classes as $classFile) {
     require_once $root . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $classFile);
@@ -43,7 +48,9 @@ $routes = [
     'account' => ['GET', 'POST'],
     'register' => ['GET', 'POST'], 'logout' => ['POST'],
     'projects' => ['GET', 'POST'], 'project' => ['GET'],
-    'invite' => ['POST'], 'join' => ['GET', 'POST'],
+    'invite' => ['POST'], 'assign-voice' => ['POST'],
+    'join' => ['GET', 'POST'],
+    'email-invite' => ['POST'], 'email-join' => ['GET', 'POST'],
     'select-take' => ['POST'], 'upload' => ['POST'],
     'audio' => ['GET', 'HEAD'],
 ];
@@ -82,6 +89,9 @@ try {
     $database = $install->database();
     $auth = new AuthService($database);
     $user = $auth->currentUser();
+    $emailInviteController = new EmailInviteController(
+        new EmailInviteService($database, $storage)
+    );
     if ($route === 'login') {
         $account->login($auth);
         exit;
@@ -92,6 +102,10 @@ try {
     }
     if ($route === 'logout') {
         $account->logout($auth);
+        exit;
+    }
+    if ($route === 'email-join') {
+        $emailInviteController->join($auth);
         exit;
     }
     if ($route === 'join' && $user === null) {
@@ -115,6 +129,11 @@ try {
         Http::redirect('login');
     }
 
+    if ($route === 'email-invite') {
+        $emailInviteController->send($user['id']);
+        exit;
+    }
+
     if ($route === 'account') {
         $account->changePassword($auth);
         exit;
@@ -130,6 +149,9 @@ try {
             break;
         case 'invite':
             $studio->invite();
+            break;
+        case 'assign-voice':
+            $studio->assignVoice();
             break;
         case 'join':
             $studio->join();

@@ -138,6 +138,7 @@ final class InstallService
             $model = new InstallModel($ddl);
             $model->applySchema($this->schemaDirectory . DIRECTORY_SEPARATOR . 'accounts.sql');
             $model->applySchema($this->schemaDirectory . DIRECTORY_SEPARATOR . 'studio.sql');
+            $model->applySchema($this->schemaDirectory . DIRECTORY_SEPARATOR . 'email-invites.sql');
             $email = mb_strtolower(trim($input['email']));
             if (filter_var($email, FILTER_VALIDATE_EMAIL) === false
                 || strlen($email) > 254) {

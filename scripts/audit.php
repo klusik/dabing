@@ -111,7 +111,7 @@ function auditSources(array $files): void
     ));
 }
 
-/** Apply both actual DDL files twice and verify required tables and defaults.
+/** Apply all actual schema files twice and verify required tables and defaults.
  * @return void No return value.
  */
 function auditSchema(): void
@@ -140,10 +140,10 @@ function auditSchema(): void
     );
     $installer = new InstallModel($database);
     $root = dirname(__DIR__);
-    foreach (['accounts.sql', 'studio.sql'] as $schema) {
+    foreach (['accounts.sql', 'studio.sql', 'email-invites.sql'] as $schema) {
         $installer->applySchema($root . '/database/' . $schema);
     }
-    foreach (['accounts.sql', 'studio.sql'] as $schema) {
+    foreach (['accounts.sql', 'studio.sql', 'email-invites.sql'] as $schema) {
         $installer->applySchema($root . '/database/' . $schema);
     }
 
@@ -151,6 +151,8 @@ function auditSchema(): void
         'dabing_users', 'dabing_login_attempts', 'dabing_projects',
         'dabing_project_members', 'dabing_project_invites',
         'dabing_project_chapters', 'dabing_script_lines', 'dabing_recordings',
+        'dabing_voice_assignments', 'dabing_email_invites',
+        'dabing_email_invite_limits',
     ];
     $query = $database->prepare(
         'SELECT TABLE_NAME, ENGINE, TABLE_COLLATION FROM information_schema.TABLES '
@@ -175,7 +177,7 @@ function auditSchema(): void
     }
     $version = (string) $database->query('SELECT VERSION()')->fetchColumn();
     fwrite(STDOUT, sprintf(
-        "PASS schema idempotence: applied accounts.sql and studio.sql twice on %s; verified %d InnoDB utf8mb4 tables.\n",
+        "PASS schema idempotence: applied all schema files twice on %s; verified %d InnoDB utf8mb4 tables.\n",
         $version,
         count($expected)
     ));

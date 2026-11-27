@@ -237,7 +237,7 @@ final class Http
     /** Render one fixed application view inside the shared layout.
      * @param string $view Fixed view key, never a path.
      * @param string $title Page title.
-     * @param array{errors?:list<string>,values?:array{db_host?:string,db_port?:string,db_name?:string,db_user?:string,name?:string,email?:string},keyReady?:bool,db_host?:string,db_port?:string,db_name?:string,db_user?:string,name?:string,email?:string,projects?:list<array{id:int,title:string,role:string,created_at:string,line_count:int,recording_count:int}>,project?:array{id:int,title:string,role:string},chapters?:list<array{id:int,title:string,lines:list<array{id:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,takes:list<array{id:int,user_id:int,user_name:string,created_at:string,is_selected:bool}>}>}>,members?:list<array{id:int,name:string,role:string}>,can_invite?:bool,invite_url?:string,token?:string,valid?:bool,status?:int,message?:string} $data Prepared view data.
+     * @param array{errors?:list<string>,values?:array{db_host?:string,db_port?:string,db_name?:string,db_user?:string,name?:string,email?:string},keyReady?:bool,db_host?:string,db_port?:string,db_name?:string,db_user?:string,name?:string,email?:string,projects?:list<array{id:int,title:string,role:string,created_at:string,line_count:int,recording_count:int}>,max_script_bytes?:int,max_script_paste_bytes?:int,project?:array{id:int,title:string,role:string},chapters?:list<array{id:int,title:string,lines:list<array{id:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,number:int,can_record:bool,assigned_name:?string,takes:list<array{id:int,user_id:int,user_name:string,created_at:string,is_selected:bool,attempt_no:int,media_type:string,file_name:string,audio_url:string,download_url:string}>}>}>,members?:list<array{id:int,name:string,role:string}>,voices?:list<array{character:string,assigned_user_id:?int,assigned_name:?string}>,pagination?:array{page:int,pages:int,total:int},playlist?:list<array{recording_id:int,line_number:int,character:string,chapter_title:string,attempt_no:int,media_type:string,file_name:string,audio_url:string,download_url:string}>,can_invite?:bool,invite_url?:string,token?:string,valid?:bool,invite_valid?:bool,existing_account?:bool,recipient_email?:string,project_title?:string,code?:string,status?:int,message?:string} $data Prepared view data.
      * @param array{id:int,name:string,email:string,is_admin:bool}|null $user Authenticated user or null.
      * @param int $status HTTP response status.
      * @return void No return value.
@@ -253,7 +253,8 @@ final class Http
             'install' => 'install.php', 'login' => 'login.php',
             'account' => 'account.php',
             'register' => 'register.php', 'projects' => 'projects.php',
-            'project' => 'project.php', 'join' => 'join.php', 'error' => 'error.php',
+            'project' => 'project.php', 'join' => 'join.php', 'email-join' => 'email-invite-join.php',
+            'error' => 'error.php',
         ];
         if (!isset($templates[$view])) {
             throw new HttpError(500, 'Šablona stránky není dostupná.');
@@ -281,15 +282,35 @@ final class Http
         if (headers_sent()) {
             exit;
         }
-        header('Location: ' . self::url($route, $params), true, 303);
+        $requestUri = $_SERVER['REQUEST_URI'] ?? null;
+        $path = null;
+        if (is_string($requestUri)
+            && str_starts_with($requestUri, '/')
+            && !str_starts_with($requestUri, '//')
+            && preg_match('/[\x00-\x20\x7f\\\\]/', $requestUri) !== 1
+            && preg_match('/%(?![A-Fa-f0-9]{2})/', $requestUri) !== 1) {
+            $parsedPath = parse_url($requestUri, PHP_URL_PATH);
+            if (is_string($parsedPath) && str_starts_with($parsedPath, '/')
+                && !str_starts_with($parsedPath, '//')) {
+                $path = $parsedPath;
+            }
+        }
+        $base = $path ?? './';
+        header('Location: ' . $base . self::url($route, $params), true, 303);
         exit;
     }
 
     /** Consume a pending invitation after authentication.
-     * @return never Redirects to the pending invitation or project list.
+     * @return never Redirects to a pending invitation or project list.
      */
     public static function redirectAfterLogin(): never
     {
+        $emailCode = $_SESSION['pending_email_invite_code'] ?? null;
+        unset($_SESSION['pending_email_invite_code']);
+        if (is_string($emailCode)
+            && preg_match('/\\A[a-f0-9]{32}\\z/D', $emailCode) === 1) {
+            self::redirect('email-join', ['code' => $emailCode]);
+        }
         $token = $_SESSION['pending_invite'] ?? null;
         unset($_SESSION['pending_invite']);
         if (is_string($token) && preg_match('/\A[a-f0-9]{64}\z/D', $token) === 1) {
@@ -299,7 +320,7 @@ final class Http
     }
 
     /** Send a structured JSON response and terminate the request.
-     * @param array{ok:bool,message:string,recording_id?:int} $payload Upload response payload.
+     * @param array{ok:bool,message:string,recording_id?:int,attempt_no?:int,file_name?:string,audio_url?:string,download_url?:string} $payload Upload response payload.
      * @param int $status HTTP status code.
      * @return never Does not return.
      */
