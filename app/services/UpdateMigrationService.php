@@ -136,7 +136,9 @@ final class UpdateMigrationService
             $pendingDefinitions[$id] = $this->loadDefinition($file);
         }
 
-        $ledger->createLedger();
+        if (!$ledger->ledgerExists()) {
+            $ledger->createLedger();
+        }
         foreach ($pendingDefinitions as $id => $definition) {
             $ledger->executeStatements($definition['statements']);
             $ledger->recordApplied($id, $definition['hash']);
