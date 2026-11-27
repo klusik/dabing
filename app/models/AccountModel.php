@@ -68,6 +68,53 @@ final class AccountModel
         ];
     }
 
+    /** Find one account by numeric identifier.
+     * @param int $id Account primary key.
+     * @return array{id:int,name:string,email:string,password_hash:string,is_admin:bool}|null Account row or null.
+     */
+    public function findById(int $id): ?array
+    {
+        $statement = $this->database->prepare(
+            'SELECT id, name, email, password_hash, is_admin '
+            . 'FROM dabing_users WHERE id = :id LIMIT 1'
+        );
+        $statement->execute(['id' => $id]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+        return [
+            'id' => (int) $row['id'],
+            'name' => (string) $row['name'],
+            'email' => (string) $row['email'],
+            'password_hash' => (string) $row['password_hash'],
+            'is_admin' => (bool) $row['is_admin'],
+        ];
+    }
+
+    /** Replace an account password only when its previous hash still matches.
+     * @param int $id Account primary key.
+     * @param string $expectedHash Previously observed password hash.
+     * @param string $replacementHash Newly generated password hash.
+     * @return bool True when exactly this current hash was replaced.
+     */
+    public function updatePasswordHash(
+        int $id,
+        string $expectedHash,
+        string $replacementHash
+    ): bool {
+        $statement = $this->database->prepare(
+            'UPDATE dabing_users SET password_hash = :replacement '
+            . 'WHERE id = :id AND CAST(password_hash AS BINARY) '
+            . '= CAST(:expected AS BINARY)'
+        );
+        $statement->execute([
+            'replacement' => $replacementHash,
+            'id' => $id,
+            'expected' => $expectedHash,
+        ]);
+        return $statement->rowCount() === 1;
+    }
     /** Insert a new account and return its generated ID.
      * @param string $name Display name.
      * @param string $email Normalized email address.

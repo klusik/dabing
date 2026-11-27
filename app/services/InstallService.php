@@ -146,11 +146,9 @@ final class InstallService
             if (trim($input['name']) === '' || mb_strlen(trim($input['name'])) > 120) {
                 throw new FormError('Zadejte jméno do 120 znaků.');
             }
-            if (str_contains($input['password'], "\0")
-                || strlen($input['password']) > 72
-                || mb_strlen($input['password']) < 12
-                || !hash_equals($input['password'], $input['password_confirm'])) {
-                throw new FormError('Heslo musí mít alespoň 12 znaků a potvrzení se musí shodovat.');
+            AuthService::validateNewPassword($input['password']);
+            if (!hash_equals($input['password'], $input['password_confirm'])) {
+                throw new FormError('Hesla se neshodují.');
             }
             $accountModel = new InstallModel($runtime);
             $account = $accountModel->findAccount($email);

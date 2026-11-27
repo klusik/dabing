@@ -27,6 +27,7 @@ $classes = [
     'app/models/AccountModel.php', 'app/models/InstallModel.php',
     'app/services/InstallService.php', 'app/services/AuthService.php',
     'app/services/ScriptImport.php', 'app/services/RecordingStorage.php',
+    'app/services/TakeNaming.php',
     'app/models/StudioModel.php', 'app/services/StudioService.php',
     'app/controllers/AccountController.php', 'app/controllers/StudioController.php',
 ];
@@ -39,6 +40,7 @@ error_reporting(E_ALL);
 Http::boot();
 $routes = [
     'install' => ['GET', 'POST'], 'login' => ['GET', 'POST'],
+    'account' => ['GET', 'POST'],
     'register' => ['GET', 'POST'], 'logout' => ['POST'],
     'projects' => ['GET', 'POST'], 'project' => ['GET'],
     'invite' => ['POST'], 'join' => ['GET', 'POST'],
@@ -111,6 +113,11 @@ try {
             Http::json(['ok' => false, 'message' => 'Přihlášení vypršelo.'], 401);
         }
         Http::redirect('login');
+    }
+
+    if ($route === 'account') {
+        $account->changePassword($auth);
+        exit;
     }
 
     $studio = new StudioController($database, $storage, $user);

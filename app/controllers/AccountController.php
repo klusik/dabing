@@ -132,6 +132,33 @@ final class AccountController
         ]);
     }
 
+    /** Show or process a password change for the authenticated account.
+     * @param AuthService $auth Authentication service.
+     * @return void No return value.
+     */
+    public function changePassword(AuthService $auth): void
+    {
+        $user = $auth->currentUser();
+        if ($user === null) {
+            Http::redirect('login');
+        }
+        $errors = [];
+        if (Http::method() === 'POST') {
+            Http::requireCsrf();
+            try {
+                $auth->changePassword(
+                    Http::post('current_password', false),
+                    Http::post('password', false),
+                    Http::post('password_confirm', false)
+                );
+                Http::notice('success', 'Heslo bylo změněno.');
+                Http::redirect('account');
+            } catch (FormError $error) {
+                $errors[] = $error->getMessage();
+            }
+        }
+        Http::render('account', 'Změna hesla', ['errors' => $errors], $user);
+    }
     /** Process logout using CSRF-protected POST.
      * @param AuthService $auth Authentication service.
      * @return void No return value.

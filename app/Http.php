@@ -251,6 +251,7 @@ final class Http
     ): void {
         $templates = [
             'install' => 'install.php', 'login' => 'login.php',
+            'account' => 'account.php',
             'register' => 'register.php', 'projects' => 'projects.php',
             'project' => 'project.php', 'join' => 'join.php', 'error' => 'error.php',
         ];
