@@ -15,10 +15,10 @@ declare(strict_types=1);
 
 return [
     // This file is optional; without it PHP's configured mail transport is used.
-    // Set a domain sender to improve deliverability on hosting providers.
+    // Set an explicit sender to override automatic sender selection.
     'from' => 'noreply@example.com',
 
-    // Optional Windows-only local Mailpit relay; Linux/WEDOS uses PHP mail().
+    // Optional Windows-only local Mailpit relay; other platforms use PHP mail().
     'smtp_host' => '127.0.0.1',
     'smtp_port' => 1025,
 ];

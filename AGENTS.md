@@ -21,6 +21,11 @@ snazšímu ověření.
 - Komituj po ucelených změnách. Pushuj přesnou referenci pracovní větve.
   Po kontrole se pracovní větev integruje do `develop` přes squash. Integrace
   a změny `main` vyžadují samostatné zadání. Nepřepisuj cizí commity ani ochrany.
+- Každé stabilní vydání vychází z `main`. Po samostatném schválení vydání
+  přenes ověřený strom z `develop` do `main` schváleným postupem, který
+  respektuje ochrany větve. Ověř přesný commit na `main` a až z něj připrav
+  tag, balík a vydání. Neprováděj přímý push na chráněnou `main` ani ji
+  neobcházej.
 - Všechny příkazy Git spouštěj mimo sandbox. Před zápisem a pushem ověř složku,
   větev, HEAD, vzdálený repozitář a příslušné reference.
 - Kvalifikuj přesný commit v hostované CI. Když CI neexistuje nebo nebyla

@@ -157,7 +157,7 @@ try {
     }
 
     if ($route === 'email-invite') {
-        $emailInviteController->send($user['id']);
+        $emailInviteController->send($user['id'], $user['email']);
         exit;
     }
 
