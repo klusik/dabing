@@ -43,7 +43,8 @@ final class AuthService
         $this->accounts = new AccountModel($database);
     }
 
-    /** Return the current session account only while its password hash is unchanged.
+    /** Return the current account after active, session-version and fingerprint checks.
+     * Legacy sessions without a version use 0 only when their password fingerprint is valid.
      * @return array{id:int,name:string,email:string,is_admin:bool}|null Authenticated account or null.
      */
     public function currentUser(): ?array

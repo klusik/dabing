@@ -18,9 +18,6 @@ namespace Dabing;
 /** Centralizes transport helpers without resolving user input to file paths. */
 final class Http
 {
-    /** @var string|null Canonical browser-visible application base URL. */
-    private static ?string $configuredPublicBase = null;
-
     /** Maximum accepted uploaded file size before service-level validation.
      * Type: int; Units: bytes; Scope: one normalized PHP upload; Consumers: file();
      * Rationale: keep request metadata bounded at the HTTP boundary.
@@ -275,25 +272,6 @@ final class Http
         return $scheme . '://' . $authority . $path;
     }
 
-    /** Configure or clear the canonical browser-visible base URL.
-     * @param string|null $url Already normalized base URL, or null to clear it.
-     * @return void No return value.
-     */
-    public static function configurePublicBase(?string $url): void
-    {
-        self::$configuredPublicBase = $url === null
-            ? null
-            : self::normalizePublicBaseUrl($url);
-    }
-
-    /** Return the configured canonical public base URL.
-     * @return string|null Normalized URL or null when unset/invalid.
-     */
-    public static function publicBaseUrl(): ?string
-    {
-        return self::$configuredPublicBase;
-    }
-
     /** Build a query-only URL for a known route and scalar parameters.
      * @param string $route Allowlisted route name.
      * @param array<string,int|string> $params Scalar query parameters.
@@ -311,7 +289,7 @@ final class Http
         return '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
     }
 
-    /** Build an application route URL using the public base when configured.
+    /** Build a same-origin query-only URL for an application route.
      * @param string $route Allowlisted route name.
      * @param array<string,int|string> $params Scalar query parameters.
      * @return string Query-only route URL on the current browser origin.
@@ -322,9 +300,9 @@ final class Http
         return $query;
     }
 
-    /** Build a safe static asset URL.
+    /** Build a relative URL for one existing static asset with a content digest.
      * @param string $filename Simple public asset filename.
-     * @return string Public URL to an asset or an empty asset URL on invalid input.
+     * @return string Relative URL with digest, or base asset path when invalid or missing.
      */
     public static function asset(string $filename): string
     {
@@ -332,7 +310,17 @@ final class Http
             || str_contains($filename, '..')) {
             return './public/assets/';
         }
-        return './public/assets/' . rawurlencode($filename);
+        $assetPath = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'public'
+            . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . $filename;
+        if (!is_file($assetPath) || !is_readable($assetPath)) {
+            return './public/assets/';
+        }
+        $digest = hash_file('sha256', $assetPath);
+        if (!is_string($digest)) {
+            return './public/assets/';
+        }
+        return './public/assets/' . rawurlencode($filename)
+            . '?v=' . $digest;
     }
 
     /** Store one typed flash notice for the next rendered page.
@@ -352,7 +340,27 @@ final class Http
     /** Render one fixed application view inside the shared layout.
      * @param string $view Fixed view key, never a path.
      * @param string $title Page title.
-     * @param array{errors?:list<string>,values?:array{db_host?:string,db_port?:string,db_name?:string,db_user?:string,name?:string,email?:string},db_host?:string,db_port?:string,db_name?:string,db_user?:string,name?:string,email?:string,projects?:list<array{id:int,title:string,role:string,created_at:string,line_count:int,recording_count:int}>,max_script_bytes?:int,max_script_paste_bytes?:int,project?:array{id:int,title:string,role:string},chapters?:list<array{id:int,title:string,lines:list<array{id:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,number:int,can_record:bool,assigned_name:?string,takes:list<array{id:int,user_id:int,user_name:string,created_at:string,is_selected:bool,can_delete:bool,attempt_no:int,media_type:string,file_name:string,audio_url:string,download_url:string}>}>}>,members?:list<array{id:int,name:string,role:string}>,voices?:list<array{character:string,assigned_user_id:?int,assigned_name:?string}>,pagination?:array{page:int,pages:int,total:int},playlist?:list<array{recording_id:int,line_number:int,character:string,chapter_title:string,attempt_no:int,media_type:string,file_name:string,audio_url:string,download_url:string}>,current_version?:string,latest_release?:array{version:string,url:string,sha256:string,size:int}|null,can_invite?:bool,has_recordings?:bool,export_url?:string,invite_url?:string,token?:string,valid?:bool,invite_valid?:bool,existing_account?:bool,recipient_email?:string,project_title?:string,code?:string,status?:int,message?:string} $data Prepared view data.
+     * @param array{
+     *     errors?:list<string>,
+     *     values?:array{db_host?:string,db_port?:string,db_name?:string,db_user?:string,name?:string,email?:string},
+     *     db_host?:string,db_port?:string,db_name?:string,db_user?:string,name?:string,email?:string,
+     *     projects?:list<array{id:int,title:string,role?:string,created_at?:string,line_count?:int,recording_count?:int,roles?:list<string>}>,
+     *     users?:list<array{id:int,name:string,email:string,is_admin:bool,is_active:bool,books:list<array{id:int,title:string,roles:list<string>}>}>,
+     *     max_script_bytes?:int,max_script_paste_bytes?:int,
+     *     project?:array{id:int,title:string,role:string},
+     *     chapters?:list<array{id:int,title:string,lines:list<array{id:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,number:int,can_record:bool,assigned_name:?string,takes:list<array{id:int,user_id:?int,user_name:string,created_at:string,is_selected:bool,can_delete:bool,attempt_no:int,media_type:string,file_name:string,audio_url:string,download_url:string}>}>}>,
+     *     members?:list<array{id:int,name:string,is_active:bool,role:string}>,
+     *     voices?:list<array{character:string,assigned_user_id:?int,assigned_name:?string,assigned_users:list<int>}>,
+     *     role_users?:list<array{id:int,name:string,email:string,is_active:bool}>,
+     *     email_invites?:list<array{id:int,email:string,roles:list<string>,state:'pending'|'claimed'|'failed'|'cancelled'|'expired'|'sent',expires_at_local:?string,delivery_error:?string,created_at_local:string}>,
+     *     filter?:'all'|'mine',pagination?:array{page:int,pages:int,total:int},
+     *     playlist?:list<array{recording_id:int,line_number:int,character:string,chapter_title:string,attempt_no:int,media_type:string,file_name:string,audio_url:string,download_url:string}>,
+     *     current_version?:string,latest_release?:array{version:string,url:string,sha256:string,size:int}|null,
+     *     can_invite?:bool,has_recordings?:bool,is_admin?:bool,export_url?:string,
+     *     invite_valid?:bool,existing_account?:bool,wrong_account?:bool,
+     *     recipient_email?:string,project_title?:string,code?:string,roles?:list<string>,
+     *     status?:int,message?:string
+     * } $data Prepared view data.
      * @param array{id:int,name:string,email:string,is_admin:bool}|null $user Authenticated user or null.
      * @param int $status HTTP response status.
      * @return void No return value.

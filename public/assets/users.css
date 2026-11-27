@@ -12,7 +12,7 @@
 .users-heading h1 { margin: 0; font-size: clamp(28px, 4vw, 42px); }
 .users-table-scroll { width: 100%; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.46); }
 .users-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.users-table th, .users-table td { padding: 8px 10px; border-bottom: 1px solid rgba(36,42,37,.09); text-align: left; vertical-align: top; }
+.users-table th, .users-table td { padding: 5px 8px; border-bottom: 1px solid rgba(36,42,37,.09); text-align: left; vertical-align: top; }
 .users-table thead th { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .users-table th:nth-child(1) { width: 25%; }
 .users-table th:nth-child(2) { width: 13%; }
@@ -30,10 +30,10 @@
 .users-book-line { display: flex; flex-wrap: wrap; gap: 2px 7px; padding: 1px 0; }
 .users-book-line strong { color: var(--ink); font-weight: 650; }
 .users-no-books { color: var(--muted); font-style: italic; }
-.users-actions-cell { padding: 4px 8px !important; }
+.users-actions-cell { padding: 3px 6px !important; }
 .users-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
 .users-icon-form { margin: 0; }
-.users-action.icon-control { width: 36px; min-width: 36px; height: 36px; flex-basis: 36px; border-radius: 10px; font-size: 16px; }
+.users-action.icon-control { width: 26px; min-width: 26px; height: 26px; flex-basis: 26px; border-radius: 7px; font-size: 12px; }
 .users-action.is-disabled { opacity: .42; cursor: default; }
 .users-action.is-disabled:hover { border-color: rgba(36,42,37,.13); background: rgba(255,255,255,.72); }
 .users-password-trigger { color: var(--forest-deep); }
@@ -61,15 +61,17 @@
     .users-table { display: block; }
     .users-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
     .users-table tbody { display: block; }
-    .users-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 9px 10px; border-bottom: 1px solid rgba(36,42,37,.1); }
+    .users-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 7px; padding: 8px 9px; border-bottom: 1px solid rgba(36,42,37,.1); }
     .users-table tr:last-child { border-bottom: 0; }
     .users-table th, .users-table td { width: auto !important; min-width: 0; padding: 0; border: 0; }
     .users-account { grid-column: 1; grid-row: 1; }
     .users-status-cell { grid-column: 2; grid-row: 1; justify-self: end; }
-    .users-books-cell { grid-column: 1 / -1; grid-row: 2; }
-    .users-actions-cell { grid-column: 1 / -1; grid-row: 3; }
-    .users-actions { justify-content: flex-start; gap: 7px; }
-    .users-action.icon-control { width: 42px; min-width: 42px; height: 42px; flex-basis: 42px; }
+    .users-books-cell { grid-column: 1; grid-row: 2; }
+    .users-actions-cell { grid-column: 2; grid-row: 2; }
+    .users-actions { justify-content: flex-end; gap: 3px; }
+    .users-action.icon-control { width: 38px; min-width: 38px; height: 38px; flex-basis: 38px; border-radius: 9px; font-size: 15px; }
+    .users-book-line { gap: 2px 4px; }
+    .users-book-line strong, .users-book-line span { overflow-wrap: anywhere; }
     .users-popover { width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 24px); }
     .users-popover-scroll { max-height: calc(100vh - 170px); }
     .users-role-form label, .users-delete-form label { min-height: 36px; }

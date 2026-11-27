@@ -102,7 +102,6 @@ try {
     }
 
     $install = new InstallService($storage, $root . DIRECTORY_SEPARATOR . 'database');
-    Http::configurePublicBase($install->publicBaseUrl());
     $account = new AccountController($install);
     $installed = $install->isInstalled();
 

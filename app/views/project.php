@@ -25,7 +25,7 @@ $hasRecordings = (bool) ($data['has_recordings'] ?? false);
 $filter = (string) ($data['filter'] ?? 'all');
 ?>
 <section class="workspace-heading">
-    <div class="workspace-title"><a class="back-link" href="<?= Http::escape(Http::url('projects')) ?>" title="Moje knihy" aria-label="Zpět na moje knihy">←<span class="sr-only">Zpět na moje knihy</span></a><p class="eyebrow"><span class="eyebrow-dot"></span> <?= !empty($data['is_admin']) ? 'Správce' : 'Spolupracovník' ?> · soukromé studio</p><h1><?= Http::escape((string) ($project['title'] ?? 'Audiokniha')) ?></h1></div>
+    <div class="workspace-title"><a class="back-link" href="<?= Http::escape(Http::url('projects')) ?>" title="Moje knihy" aria-label="Zpět na moje knihy">←<span class="sr-only">Zpět na moje knihy</span></a><h1><?= Http::escape((string) ($project['title'] ?? 'Audiokniha')) ?></h1></div>
     <div class="workspace-actions">
         <?php if ($canInvite): ?>
             <div class="anchored-control">
@@ -87,6 +87,10 @@ $filter = (string) ($data['filter'] ?? 'all');
             Mikrofon bude vyžádán po stisknutí tlačítka pro nahrávání.
         </span>
     </div>
+    <nav class="script-filter" aria-label="Filtr replik">
+        <a class="<?= $filter === 'all' ? 'is-current' : '' ?>" href="<?= Http::escape(Http::url('project', ['id' => $project['id'], 'filter' => 'all'])) ?>"<?= $filter === 'all' ? ' aria-current="page"' : '' ?>>Všechny</a>
+        <a class="<?= $filter === 'mine' ? 'is-current' : '' ?>" href="<?= Http::escape(Http::url('project', ['id' => $project['id'], 'filter' => 'mine'])) ?>"<?= $filter === 'mine' ? ' aria-current="page"' : '' ?>>Moje repliky</a>
+    </nav>
     <div class="studio-toolbar-actions">
         <a
             class="icon-control"
@@ -108,10 +112,6 @@ $filter = (string) ($data['filter'] ?? 'all');
         <?php endif; ?>
     </div>
 </section>
-<nav class="script-filter" aria-label="Filtr replik">
-    <a class="<?= $filter === 'all' ? 'is-current' : '' ?>" href="<?= Http::escape(Http::url('project', ['id' => $project['id'], 'filter' => 'all'])) ?>"<?= $filter === 'all' ? ' aria-current="page"' : '' ?>>Všechny repliky</a>
-    <a class="<?= $filter === 'mine' ? 'is-current' : '' ?>" href="<?= Http::escape(Http::url('project', ['id' => $project['id'], 'filter' => 'mine'])) ?>"<?= $filter === 'mine' ? ' aria-current="page"' : '' ?>>Moje repliky</a>
-</nav>
 <?php if ((int) ($pagination['pages'] ?? 1) > 1): ?>
     <nav class="script-pagination" aria-label="Stránkování scénáře">
         <?php if ((int) ($pagination['page'] ?? 1) > 1): ?>
@@ -155,8 +155,7 @@ $filter = (string) ($data['filter'] ?? 'all');
                                     <div class="take-row<?= !empty($take['is_selected']) ? ' take-selected' : '' ?><?= !empty($take['can_delete']) ? ' take-row-has-delete' : '' ?>">
                                         <div class="take-meta">
                                             <span class="attempt-badge" title="Číslo pokusu"><?= sprintf('%03d', $attemptNo) ?></span>
-                                            <span class="take-name" title="<?= Http::escape(trim($fileName . ' · ' . (string) $take['user_name'])) ?>">
-                                                <?php if ($fileName !== ''): ?><code class="take-filename"><?= Http::escape($fileName) ?></code><?php endif; ?>
+                                            <span class="take-name" title="<?= Http::escape((string) $take['user_name']) ?>">
                                                 <span class="take-byline"><?= Http::escape((string) $take['user_name']) ?><?= !empty($take['is_selected']) ? ' · vybráno' : '' ?></span>
                                             </span>
                                         </div>
@@ -210,8 +209,11 @@ $filter = (string) ($data['filter'] ?? 'all');
         <div class="playlist-top"><span class="playlist-icon" aria-hidden="true">♫</span><span class="card-kicker">Vybrané repliky</span></div>
         <h2>Poslech</h2><p class="muted">Vybrané nahrávky v pořadí scénáře.</p>
         <div class="master-player">
-            <audio controls preload="none" data-story-player aria-label="Souvislý poslech vybraných replik"></audio>
-            <div class="master-controls"><button type="button" class="icon-control" data-play-previous aria-label="Předchozí replika" title="Předchozí replika">←</button><button type="button" class="icon-control" data-play-next aria-label="Další replika" title="Další replika">→</button></div>
+            <div class="master-controls">
+                <button type="button" class="icon-control" data-play-previous aria-label="Předchozí replika" title="Předchozí replika">←</button>
+                <audio controls preload="none" data-story-player aria-label="Souvislý poslech vybraných replik"></audio>
+                <button type="button" class="icon-control" data-play-next aria-label="Další replika" title="Další replika">→</button>
+            </div>
             <p class="playlist-current" data-playlist-status aria-live="polite">Vyberte repliku v seznamu nebo stiskněte Přehrát.</p>
         </div>
         <div class="playlist-items" data-playlist tabindex="0" role="region" aria-label="Seznam všech vybraných nahrávek">
