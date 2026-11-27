@@ -1,0 +1,51 @@
+name: Basic source checks
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+  pull_request:
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  basic:
+    name: Syntax, JSON, and MariaDB schema
+    runs-on: ubuntu-24.04
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: dabing_ci_root
+          MARIADB_DATABASE: dabing_test
+          MARIADB_USER: dabing_ci
+          MARIADB_PASSWORD: dabing_ci_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DABING_DB_HOST: 127.0.0.1
+      DABING_DB_PORT: 3306
+      DABING_DB_NAME: dabing_test
+      DABING_DB_USER: dabing_ci
+      DABING_DB_PASSWORD: dabing_ci_password
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Confirm runtime tools
+        run: |
+          php --version
+          node --version
+          php -r "exit(extension_loaded('pdo_mysql') ? 0 : 1);"
+      - name: Run BASIC audit
+        run: php scripts/audit.php
