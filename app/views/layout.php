@@ -32,15 +32,15 @@ use Dabing\Http;
         </a>
         <nav class="top-nav" aria-label="Hlavní navigace">
             <?php if ($user): ?>
-                <a class="nav-link<?= ($view ?? '') === 'projects' ? ' is-current' : '' ?>" href="<?= Http::escape(Http::url('projects')) ?>">Moje projekty</a>
-                <span class="user-chip"><span class="avatar" aria-hidden="true"><?= Http::escape((preg_match('/\\A./us', (string) $user['name'], $initial) === 1 ? strtoupper($initial[0]) : 'D')) ?></span><span><?= Http::escape((string) $user['name']) ?></span></span>
+                <a class="icon-control" href="<?= Http::escape(Http::url('projects')) ?>" aria-label="Moje knihy" title="Moje knihy"><span aria-hidden="true">▦</span></a>
+                <a class="icon-control" href="<?= Http::escape(Http::url('account')) ?>" aria-label="Účet <?= Http::escape((string) $user['name']) ?>" title="Účet"><span aria-hidden="true">♙</span></a>
                 <form method="post" action="<?= Http::escape(Http::url('logout')) ?>" class="nav-form">
                     <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
-                    <button class="nav-link nav-button" type="submit">Odhlásit</button>
+                    <button class="icon-control" type="submit" aria-label="Odhlásit se" title="Odhlásit se"><span aria-hidden="true">↪</span></button>
                 </form>
             <?php else: ?>
-                <a class="nav-link" href="<?= Http::escape(Http::url('login')) ?>">Přihlásit se</a>
-                <a class="button button-small button-ink" href="<?= Http::escape(Http::url('register')) ?>">Vytvořit účet <span aria-hidden="true">↗</span></a>
+                <?php if (($view ?? '') !== 'login'): ?><a class="icon-control" href="<?= Http::escape(Http::url('login')) ?>" aria-label="Přihlásit se" title="Přihlásit se"><span aria-hidden="true">↪</span></a><?php endif; ?>
+                <?php if (($view ?? '') !== 'register'): ?><a class="icon-control" href="<?= Http::escape(Http::url('register')) ?>" aria-label="Vytvořit účet" title="Vytvořit účet"><span aria-hidden="true">＋</span></a><?php endif; ?>
             <?php endif; ?>
         </nav>
     </header>

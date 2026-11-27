@@ -43,7 +43,9 @@ Před aktualizací zálohujte databázi a úložiště. Pozastavte nahrávání 
 repozitáře spusťte `php scripts/migrate_recording_attempts.php DDL_USER`.
 Heslo databázového účtu s právy ke změně schématu zadejte přes stdin.
 Migrace doplní pořadí dřívějších pokusů a zachová jejich formáty i výběr pro
-poslech. Příkaz lze bezpečně spustit opakovaně.
+poslech. Potom aplikujte opakovatelná schémata database/studio.sql a
+database/email-invites.sql účtem s právy ke změně schématu. První příkaz
+můžete bezpečně spustit opakovaně.
 
 ## Scénář
 
@@ -78,14 +80,20 @@ poslechu. Hodnotu `number` zapisujte jako celé číslo od jedné, například
 verze 1 přiřadí stejná čísla podle pořadí v polích.
 
 Vyžaduje se nejméně jedna kapitola a jedna replika v každé kapitole.
-Scénář má limit 200 kapitol a celkem 1 000 replik. Titul knihy a kapitoly
+Scénář má limit 200 kapitol a celkem 9 999 replik. Titul knihy a kapitoly
 může mít 200 znaků, postava 100 znaků a replika 10 000 znaků.
 
 ## Záznamy a poslech
 
-Vlastník vytvoří jednorázovou pozvánku. Příjemce se přihlásí nebo si založí
-účet a pozvánku potvrdí. Každá replika má vlastní číslování pokusů sdílené
-všemi mluvčími. U názvu knihy *O pejskovi* mají například první dva pokusy
+Vlastník pozve čtenáře e-mailem. Jednorázový kód z pozvánky patří jedné knize
+a konkrétní adrese. Při potvrzení si nový uživatel nastaví jméno a heslo.
+Uživatel s existujícím účtem se přihlásí a potvrdí pozvánku. Po přijetí může
+vlastník v nabídce Obsazení přiřadit čtenáře k postavám. Nepřiřazenou repliku
+může nahrát člen knihy. Přiřazenou repliku nahrává vybraný čtenář nebo autor.
+Změna obsazení zachová všechny uložené pokusy.
+
+Každá replika má vlastní číslování pokusů sdílené
+všemi mluvčími. Replika má nejvýše 999 pokusů. U názvu knihy *O pejskovi* mají například první dva pokusy
 pro první repliku názvy `o_pejskovi_0001_001.mp3` a
 `o_pejskovi_0001_002.mp3`. Jednotlivé názvy jsou uvedené u nahrávek a
 použijí se také při stažení do počítače.
@@ -100,6 +108,19 @@ enkodéru. [lamejs](docs/third-party/lamejs-notice.md)
 Heslo se mění v nastavení účtu po zadání současného hesla. Po úspěšné
 změně zůstane aktuální relace přihlášená. Ostatní relace stejného účtu
 budou vyžadovat nové přihlášení.
+
+## Pošta pro pozvánky
+
+Zkopírujte `config/mail.example.php` do neveřejného `storage/mail.php`.
+Nastavte `base_url` na veřejnou HTTPS adresu instalace a `from` na adresu
+odesílatele na vaší doméně. Na WEDOSu využívá aplikace PHP mail() s adresou
+odesílatele pro návratovou cestu. [Nastavení pošty WEDOS](https://kb.vedos.cz/maily-blokovani/)
+
+V Laragonu lze použít Mailpit a veřejnou adresu `http://localhost/dabing/`.
+Volitelné klíče `smtp_host` a `smtp_port` nastavují přímé SMTP v PHP na
+Windows. Je-li nastavený `sendmail_path`, transport vybírá tento příkaz.
+Výchozí místní Mailpit přijímá zkušební poštu na portu 1025 a ukazuje ji
+v rozhraní na portu 8025.
 
 ## Vývoj
 

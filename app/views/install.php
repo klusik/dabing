@@ -13,13 +13,7 @@ use Dabing\Http;
  * License: All rights reserved
  */
 ?>
-<section class="auth-layout install-layout">
-    <div class="auth-story">
-        <p class="eyebrow">Instalace</p>
-        <h1>Instalace<br><em>systému.</em></h1>
-        <p class="lede">Zadejte údaje k databázi a vytvořte první účet správce.</p>
-        <div class="story-note"><span class="note-icon" aria-hidden="true">✓</span><span>Hesla se zobrazí pouze při zadávání a nevracejí se do formuláře.</span></div>
-    </div>
+<section class="auth-layout auth-centered">
     <div class="auth-card install-card">
         <?php if (array_key_exists('keyReady', $data) && !$data['keyReady']): ?><div class="setup-hint" role="note">Instalační klíč zatím není připraven. Požádejte správce serveru o jeho nastavení a vraťte se sem.</div><?php endif; ?>
         <div class="card-kicker">Nastavení instalace</div>

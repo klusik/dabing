@@ -13,13 +13,7 @@ use Dabing\Http;
  * License: All rights reserved
  */
 ?>
-<section class="auth-layout">
-    <div class="auth-story">
-        <p class="eyebrow">Přístup do studia</p>
-        <h1>Registrace</h1>
-        <p class="lede">Účet umožňuje zakládat projekty a přijímat pozvánky do soukromých audioknih.</p>
-        <div class="story-note"><span class="note-icon" aria-hidden="true">✓</span><span>Každý člen získá přístup pouze k projektům, do kterých je pozván.</span></div>
-    </div>
+<section class="auth-layout auth-centered">
     <div class="auth-card">
         <div class="card-kicker">Údaje k účtu</div>
         <h2>Vytvořit účet</h2>

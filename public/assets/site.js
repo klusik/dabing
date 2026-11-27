@@ -22,6 +22,18 @@
 const MAX_RECORDING_SECONDS = 180;
 
 /**
+ * MP3 sample-rate policy.
+ * Type: Integer
+ * Units: Samples per second
+ * Scope: Every uploaded take
+ * Consumers: OfflineAudioContext resampling and encoder worker
+ * Rationale: Keep one predictable mono sample format for MP3 encoding.
+ * Value: 44100 samples per second.
+ */
+const MP3_SAMPLE_RATE = 44100;
+const MP3_WORKER_PATH = './public/assets/mp3-worker.js';
+
+/**
  * MIME preference for browsers that expose a supported recorder format.
  * Type: Array<string>
  * Units: MIME types
@@ -81,7 +93,7 @@ function bindPanel(trigger, panel) {
  * @param {HTMLElement} status - The accessible status paragraph for this line.
  * @returns {void} The preview is shown and can be uploaded after user confirmation.
  */
-function showRecordingPreview(preview, blob, fileName, card, status) {
+function showRecordingPreview(preview, blob, card, status) {
     preview.querySelectorAll('audio[src^="blob:"]').forEach((player) => URL.revokeObjectURL(player.src));
     preview.replaceChildren();
     const player = document.createElement('audio');
@@ -89,54 +101,160 @@ function showRecordingPreview(preview, blob, fileName, card, status) {
     player.controls = true;
     player.preload = 'metadata';
     player.src = objectUrl;
-    player.setAttribute('aria-label', 'Náhled nahrávky před odesláním');
+    player.setAttribute('aria-label', 'Náhled vybrané nahrávky');
     const upload = document.createElement('button');
     upload.type = 'button';
-    upload.className = 'upload-button';
-    upload.textContent = 'Nahrát nahrávku';
+    upload.className = 'icon-control upload-button';
+    upload.title = 'Převést a nahrát jako MP3';
+    upload.setAttribute('aria-label', 'Převést a nahrát nahrávku jako MP3');
+    upload.textContent = '↑';
     upload.addEventListener('click', () => {
-        uploadRecording(card, blob, fileName, status, upload);
+        uploadRecording(card, blob, status, upload);
     });
     preview.append(player, upload);
     preview.hidden = false;
-    status.textContent = 'Poslechněte si náhled. Nahrávka se odešle až po stisknutí tlačítka.';
+    status.textContent = 'Náhled připraven. Při odeslání se převede na MP3.';
     player.addEventListener('emptied', () => URL.revokeObjectURL(objectUrl), { once: true });
 }
 
 /**
- * Send one explicitly confirmed audio file for the current script line.
- * @param {HTMLElement} card - The line card whose line identifier is uploaded.
- * @param {Blob} blob - The audio data to submit.
- * @param {string} fileName - The filename supplied in multipart form data.
- * @param {HTMLElement} status - The accessible upload status element.
- * @param {HTMLButtonElement} button - The upload button to lock during submission.
- * @returns {Promise<void>} Resolves after a success message or a readable failure.
+ * Encode mono 44.1 kHz samples with the local MP3 worker.
+ * @param {Int16Array} samples - Clamped, signed mono audio samples.
+ * @returns {Promise<ArrayBuffer>} Encoded MP3 bytes or a conversion failure.
  */
-async function uploadRecording(card, blob, fileName, status, button) {
-    const token = card.querySelector('input[name="csrf"]')?.value ?? '';
-    const lineId = card.closest('[data-line-card]')?.dataset.lineId ?? card.dataset.lineId ?? '';
-    const form = new FormData();
-    form.append('csrf', token);
-    form.append('line_id', lineId);
-    form.append('audio', blob, fileName);
-    button.disabled = true;
-    status.textContent = 'Nahrávám repliku…';
+function encodeMp3WithWorker(samples) {
+    return new Promise((resolve, reject) => {
+        let worker;
+        try {
+            worker = new Worker(MP3_WORKER_PATH);
+        } catch (error) {
+            reject(new Error('MP3 převod se nepodařilo spustit.'));
+            return;
+        }
+        worker.onmessage = (event) => {
+            worker.terminate();
+            const result = event.data;
+            if (result?.ok === true && result.buffer instanceof ArrayBuffer
+                && result.buffer.byteLength > 0) {
+                resolve(result.buffer);
+                return;
+            }
+            reject(new Error('MP3 převod se nepodařilo dokončit.'));
+        };
+        worker.onerror = () => {
+            worker.terminate();
+            reject(new Error('MP3 převod se nepodařilo dokončit.'));
+        };
+        try {
+            worker.postMessage(
+                { samples, sampleRate: MP3_SAMPLE_RATE },
+                [samples.buffer]
+            );
+        } catch (error) {
+            worker.terminate();
+            reject(new Error('MP3 převod se nepodařilo spustit.'));
+        }
+    });
+}
+
+/**
+ * Decode any supported source, downmix and resample it, then encode genuine MP3.
+ * @param {Blob} source - Original preview recording or selected audio file.
+ * @returns {Promise<Blob>} A mono 44.1 kHz MP3 blob ready for upload.
+ */
+async function convertToMp3(source) {
+    const AudioContextType = window.AudioContext || window.webkitAudioContext;
+    const OfflineContextType = window.OfflineAudioContext
+        || window.webkitOfflineAudioContext;
+    if (!AudioContextType || !OfflineContextType) {
+        throw new Error('Tento prohlížeč neumí převést zvuk na MP3.');
+    }
+    const decoder = new AudioContextType();
     try {
-        const response = await fetch(`?route=upload&id=${encodeURIComponent(
-            document.querySelector('[data-project-id]')?.dataset.projectId ?? ''
-        )}`, { method: 'POST', body: form, credentials: 'same-origin' });
+        const decoded = await decoder.decodeAudioData(await source.arrayBuffer());
+        if (!Number.isFinite(decoded.duration) || decoded.duration <= 0
+            || decoded.duration > MAX_RECORDING_SECONDS) {
+            throw new Error('Nahrávka musí trvat nejvýše 180 sekund.');
+        }
+        const frameCount = Math.ceil(decoded.duration * MP3_SAMPLE_RATE);
+        const offline = new OfflineContextType(1, frameCount, MP3_SAMPLE_RATE);
+        const input = offline.createBufferSource();
+        const mixer = offline.createGain();
+        input.buffer = decoded;
+        mixer.channelCount = 1;
+        mixer.channelCountMode = 'explicit';
+        mixer.channelInterpretation = 'speakers';
+        input.connect(mixer);
+        mixer.connect(offline.destination);
+        input.start(0);
+        const rendered = await offline.startRendering();
+        const mono = rendered.getChannelData(0);
+        const samples = new Int16Array(mono.length);
+        for (let index = 0; index < mono.length; index += 1) {
+            const finite = Number.isFinite(mono[index]) ? mono[index] : 0;
+            const clamped = Math.max(-1, Math.min(1, finite));
+            samples[index] = clamped < 0
+                ? Math.round(clamped * 32768)
+                : Math.round(clamped * 32767);
+        }
+        const encoded = await encodeMp3WithWorker(samples);
+        return new Blob([encoded], { type: 'audio/mpeg' });
+    } catch (error) {
+        if (error instanceof Error && error.message.includes('180 sekund')) {
+            throw error;
+        }
+        throw new Error('Zvuk se nepodařilo převést na MP3. Původní náhled zůstává k dispozici.');
+    } finally {
+        if (decoder.state !== 'closed') await decoder.close();
+    }
+}
+
+/**
+ * Convert a confirmed preview to MP3 and upload it without discarding the source.
+ * @param {HTMLElement} card - The line card containing identifiers and CSRF token.
+ * @param {Blob} blob - Original captured or selected audio, kept for retry.
+ * @param {string} fileName - Original filename used only for local preview context.
+ * @param {HTMLElement} status - Accessible conversion and upload status.
+ * @param {HTMLButtonElement} button - Conversion action disabled during processing.
+ * @returns {Promise<void>} Resolves after the upload or reports a retryable failure.
+ */
+async function uploadRecording(card, blob, status, button) {
+    const token = card.querySelector('input[name="csrf"]')?.value ?? '';
+    const lineId = card.closest('[data-line-card]')?.dataset.lineId
+        ?? card.dataset.lineId ?? '';
+    const projectId = document.querySelector('[data-project-id]')?.dataset.projectId ?? '';
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.classList.add('is-busy');
+    status.textContent = 'Převádím zvuk na MP3…';
+    try {
+        const mp3 = await convertToMp3(blob);
+        const form = new FormData();
+        form.append('csrf', token);
+        form.append('line_id', lineId);
+        form.append('audio', mp3, 'dabing-take.mp3');
+        status.textContent = 'Nahrávám MP3…';
+        const response = await fetch(
+            `?route=upload&id=${encodeURIComponent(projectId)}`,
+            { method: 'POST', body: form, credentials: 'same-origin' }
+        );
         const result = await response.json();
         if (!response.ok || !result.ok) {
             throw new Error(result.message || 'Nahrávání se nepodařilo.');
         }
-        status.textContent = result.message || 'Replika je uložená.';
-        button.textContent = 'Nahráno';
-        window.setTimeout(() => window.location.reload(), 650);
+        status.textContent = result.file_name
+            ? `Uloženo: ${result.file_name}`
+            : (result.message || 'Nahrávka je uložena.');
+        window.setTimeout(() => window.location.reload(), 700);
     } catch (error) {
-        status.textContent = error instanceof Error
-            ? `${error.message} Zkuste to znovu.`
-            : 'Nahrávání se nepodařilo. Zkuste to znovu.';
+        const message = error instanceof Error
+            ? error.message
+            : 'Nahrávání se nepodařilo.';
+        status.textContent = `${message} Původní náhled zůstává k dispozici; zkuste to znovu.`;
         button.disabled = false;
+    } finally {
+        button.removeAttribute('aria-busy');
+        button.classList.remove('is-busy');
     }
 }
 
@@ -221,14 +339,14 @@ function bindRecorder(card) {
                 currentName = mimeType.includes('ogg')
                     ? 'dabing-replika.ogg'
                     : (mimeType.includes('mp4') ? 'dabing-replika.mp4' : 'dabing-replika.webm');
-                showRecordingPreview(preview, blob, currentName, card, status);
+                showRecordingPreview(preview, blob, card, status);
             });
             recorder.start();
             start.hidden = true;
             start.classList.add('is-recording');
             stop.hidden = false;
             stop.focus();
-            status.textContent = 'Nahrává se. Mluvte přirozeně; tlačítkem záznam ukončíte.';
+            status.textContent = 'Nahrává se.';
             timer = window.setTimeout(() => {
                 finishRecording();
                 status.textContent = 'Limit jedné repliky vypršel. Zkontrolujte náhled a případně nahrajte repliku znovu.';
@@ -256,7 +374,7 @@ function bindRecorder(card) {
             return;
         }
         currentName = file.name || 'dabing-replika';
-        showRecordingPreview(preview, file, currentName, card, status);
+        showRecordingPreview(preview, file, card, status);
     });
     window.addEventListener('pagehide', () => {
         disposed = true;
@@ -271,32 +389,141 @@ function bindRecorder(card) {
 }
 
 /**
- * Fill the script editor with the bundled example JSON for quick onboarding.
- * @param {HTMLButtonElement} button - The button that starts the import.
- * @returns {Promise<void>} Resolves after the example fills the editor or reports failure.
+ * Insert the visible v2 JSON sample into the project import textarea.
+ * @param {HTMLButtonElement} button - The action that copies the sample into the form.
+ * @returns {void} The form receives the example and moves focus to its editor.
  */
-async function fillExampleScript(button) {
+function fillExampleScript(button) {
     const editor = document.querySelector('[data-script-editor]');
-    if (!editor) return;
-    button.disabled = true;
-    try {
-        const response = await fetch(button.dataset.exampleUrl, { credentials: 'same-origin' });
-        if (!response.ok) throw new Error('Ukázku se nepodařilo načíst.');
-        editor.value = await response.text();
-        const fileInput = document.querySelector('[data-script-file]');
-        if (fileInput) fileInput.value = '';
-        const hint = document.querySelector('[data-script-hint]');
-        if (hint) hint.textContent = 'Ukázka je vložená. Před vytvořením můžete upravit názvy kapitol i replik.';
-        editor.focus();
-        editor.dispatchEvent(new Event('input', { bubbles: true }));
-    } catch (error) {
-        editor.value = JSON.stringify({ version: 1, title: "Cesta domů", chapters: [{ title: "První kapitola", lines: [{ character: "Vypravěč", text: "Začíná nový příběh." }] }] }, null, 2);
-        editor.focus();
-    } finally {
-        button.disabled = false;
-    }
+    const sample = document.querySelector('[data-script-example]');
+    if (!editor || !sample) return;
+    const fileInput = document.querySelector('[data-script-file]');
+    if (fileInput) fileInput.value = '';
+    editor.value = sample.textContent.trim();
+    editor.focus();
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    const hint = document.querySelector('[data-script-hint]');
+    if (hint) hint.textContent = 'Ukázka vložena.';
+    button.blur();
 }
 
+/**
+ * Download the visible example as UTF-8 JSON.
+ * @param {HTMLButtonElement} button - The action that starts the download.
+ * @returns {void} The browser downloads the current v2 sample.
+ */
+function downloadExampleScript(button) {
+    const sample = document.querySelector('[data-script-example]');
+    if (!sample) return;
+    const file = new Blob([sample.textContent.trim() + '\n'], {
+        type: 'application/json;charset=utf-8'
+    });
+    const objectUrl = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = 'scenar-json-v2.json';
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    button.blur();
+}
+
+/**
+ * Copy text with clipboard API and a same-page selection fallback.
+ * @param {string} text - The exact text to place on the clipboard.
+ * @returns {Promise<void>} Resolves when copied or rejects when copying is unavailable.
+ */
+async function copyText(text) {
+    if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+    const temporary = document.createElement('textarea');
+    temporary.value = text;
+    temporary.setAttribute('readonly', '');
+    temporary.className = 'clipboard-buffer';
+    document.body.append(temporary);
+    temporary.select();
+    const copied = document.execCommand('copy');
+    temporary.remove();
+    if (!copied) throw new Error('Kopírování není dostupné.');
+}
+
+/**
+ * Bind prompt copy feedback and close behavior for the compact JSON help panel.
+ * @param {HTMLDetailsElement} disclosure - The native disclosure containing JSON help.
+ * @returns {void} Outside click, Escape, and the close icon dismiss the panel.
+ */
+function bindJsonGuidance(disclosure) {
+    const summary = disclosure.querySelector('summary');
+    const close = disclosure.querySelector('[data-close-guide]');
+    const copyButton = disclosure.querySelector('[data-copy-instructions]');
+    const copyStatus = disclosure.querySelector('[data-copy-status]');
+    const prompt = disclosure.querySelector('[data-ai-instructions]');
+    const panel = disclosure.querySelector('.guidance-panel');
+    const placePanel = () => {
+        if (!disclosure.open || !panel || !summary) return;
+        const triggerRect = summary.getBoundingClientRect();
+        panel.style.maxHeight = `${Math.max(180, window.innerHeight - 24)}px`;
+        const panelRect = panel.getBoundingClientRect();
+        const left = Math.max(
+            12,
+            Math.min(triggerRect.left, window.innerWidth - panelRect.width - 12)
+        );
+        const below = triggerRect.bottom + 10;
+        const top = below + panelRect.height <= window.innerHeight - 12
+            ? below
+            : Math.max(12, triggerRect.top - panelRect.height - 10);
+        panel.style.left = `${left}px`;
+        panel.style.top = `${top}px`;
+    };
+    disclosure.addEventListener('toggle', () => requestAnimationFrame(placePanel));
+    window.addEventListener('resize', placePanel);
+    close?.addEventListener('click', () => {
+        disclosure.open = false;
+        summary?.focus();
+    });
+    disclosure.addEventListener('click', (event) => event.stopPropagation());
+    document.addEventListener('click', (event) => {
+        if (disclosure.open && !disclosure.contains(event.target)) {
+            disclosure.open = false;
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && disclosure.open) {
+            disclosure.open = false;
+            summary?.focus();
+        }
+    });
+    copyButton?.addEventListener('click', async () => {
+        const rules = Array.from(
+            disclosure.querySelectorAll('.guidance-structure li')
+        ).map((item) => `- ${item.textContent.trim()}`);
+        const sample = disclosure.querySelector('[data-script-example]')
+            ?.textContent.trim() ?? '';
+        const filenames = disclosure.querySelector('.filename-help')
+            ?.textContent.trim() ?? '';
+        const instructions = prompt?.textContent.trim() ?? '';
+        const content = [
+            'FORMÁT A OMEZENÍ JSON V2',
+            ...rules,
+            '',
+            'PŘÍKLAD JSON V2',
+            sample,
+            '',
+            'NÁZVY SOUBORŮ',
+            filenames,
+            '',
+            'POKYNY PRO AI',
+            instructions
+        ].join('\n');
+        try {
+            await copyText(content);
+            if (copyStatus) copyStatus.textContent = 'Zkopírováno.';
+        } catch (error) {
+            if (copyStatus) copyStatus.textContent = 'Kopírování není dostupné.';
+        }
+    });
+}
 document.querySelectorAll('[data-panel-trigger]').forEach((trigger) => {
     const panel = document.getElementById(trigger.getAttribute('aria-controls'));
     if (panel) {
@@ -306,9 +533,12 @@ document.querySelectorAll('[data-panel-trigger]').forEach((trigger) => {
 });
 document.querySelectorAll('[data-recorder]').forEach(bindRecorder);
 document.querySelectorAll('[data-fill-example]').forEach((button) => {
-    button.dataset.exampleUrl = button.closest('form')?.querySelector('a[download]')?.href ?? '';
     button.addEventListener('click', () => fillExampleScript(button));
 });
+document.querySelectorAll('[data-download-example]').forEach((button) => {
+    button.addEventListener('click', () => downloadExampleScript(button));
+});
+document.querySelectorAll('[data-json-guide]').forEach(bindJsonGuidance);
 document.querySelectorAll('[data-copy-trigger]').forEach((button) => {
     button.addEventListener('click', async () => {
         const value = button.closest('.popover')?.querySelector('[data-copy-value]')?.value ?? '';
@@ -323,30 +553,46 @@ document.querySelectorAll('[data-copy-trigger]').forEach((button) => {
     });
 });
 /**
- * Keep JSON file upload and pasted JSON mutually clear and require one source.
+ * Keep JSON file and pasted content as separate import choices and enforce caps.
  * @param {HTMLFormElement} form - The project creation form.
- * @returns {void} The browser reports missing input before submission.
+ * @returns {void} Invalid or oversized inputs receive an accessible explanation.
  */
 function bindScriptImport(form) {
     const fileInput = form.querySelector('[data-script-file]');
     const editor = form.querySelector('[data-script-editor]');
     const hint = form.querySelector('[data-script-hint]');
-    if (!fileInput || !editor) return;
+    if (!fileInput || !editor || !hint) return;
+    const fileCap = Number(fileInput.dataset.maxBytes);
+    const pasteCap = Number(editor.dataset.maxBytes);
     fileInput.addEventListener('change', () => {
-        if (fileInput.files?.length) {
-            editor.value = '';
-            if (hint) hint.textContent = 'Soubor je připravený. Název knihy načteme z jeho JSON.';
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        if (Number.isFinite(fileCap) && fileCap > 0 && file.size > fileCap) {
+            fileInput.value = '';
+            hint.textContent = `Soubor přesahuje limit ${fileInput.dataset.maxLabel}.`;
+            return;
         }
+        editor.value = '';
+        hint.textContent = `Vybráno: ${file.name}`;
     });
     editor.addEventListener('input', () => {
         if (editor.value.trim() && fileInput.files?.length) fileInput.value = '';
-        if (hint && editor.value.trim()) hint.textContent = 'Použije se vložený scénář.';
+        if (editor.value.trim()) hint.textContent = 'Použije se vložený scénář.';
     });
     form.addEventListener('submit', (event) => {
-        if (fileInput.files?.length || editor.value.trim()) return;
-        event.preventDefault();
-        if (hint) hint.textContent = 'Nejprve vyberte JSON soubor, nebo vložte scénář.';
-        (hint || editor).focus();
+        if (fileInput.files?.length) return;
+        if (!editor.value.trim()) {
+            event.preventDefault();
+            hint.textContent = 'Vyberte JSON soubor, nebo vložte scénář.';
+            editor.focus();
+            return;
+        }
+        const pastedBytes = new Blob([editor.value]).size;
+        if (Number.isFinite(pasteCap) && pasteCap > 0 && pastedBytes > pasteCap) {
+            event.preventDefault();
+            hint.textContent = `Vložený JSON přesahuje limit ${editor.dataset.maxLabel}.`;
+            editor.focus();
+        }
     });
 }
 
