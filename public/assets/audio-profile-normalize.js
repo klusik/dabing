@@ -1,7 +1,7 @@
 /*
  * Project: Dabing
  * Repository: klusik/dabing
- * File: public/assets/audio-profiles/normalize.js
+ * File: public/assets/audio-profile-normalize.js
  * Module Type: Browser DSP effect
  * Purpose: Normalize peak level at its exact chain position.
  * Responsibilities: Measure the preceding buffer and apply peak gain.

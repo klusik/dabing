@@ -1,7 +1,7 @@
 /*
  * Project: Dabing
  * Repository: klusik/dabing
- * File: public/assets/audio-profiles/reverb.js
+ * File: public/assets/audio-profile-reverb.js
  * Module Type: Browser DSP effect
  * Purpose: Add deterministic convolution reverb with a controllable tail.
  * Responsibilities: Generate a bounded seeded impulse and mix dry/wet signals.

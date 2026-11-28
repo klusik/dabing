@@ -8,7 +8,7 @@
  * Author: Rudolf Klusal
  * License: All rights reserved
  */
-import { hasAudioEffects, renderAudioEffects } from './audio-profiles/engine.js';
+import { hasAudioEffects, renderAudioEffects } from './audio-profile-engine.js';
 
 /** Maximum individual ZIP payload retained in memory by this browser module.
  * Type: number; Units: bytes; Scope: one take download; Consumers: ZIP builder.

@@ -1,7 +1,7 @@
 /*
  * Project: Dabing
  * Repository: klusik/dabing
- * File: public/assets/audio-profiles/eq.js
+ * File: public/assets/audio-profile-eq.js
  * Module Type: Browser DSP effect
  * Purpose: Apply the six-band parametric equalizer.
  * Responsibilities: Build logarithmic peaking filters and optional edge cuts.

@@ -1,7 +1,7 @@
 /*
  * Project: Dabing
  * Repository: klusik/dabing
- * File: public/assets/audio-profiles/audio-profile-editor.js
+ * File: public/assets/audio-profile-editor.js
  * Module Type: Browser UI controller
  * Purpose: Operate profile controls, effect preview and audio transport.
  * Responsibilities: Edit ordered effects, graph rendered stages and monitor FFT.
@@ -32,7 +32,7 @@ if (root) {
     });
 }
 
-/** @typedef {{analysis:typeof import('./preview-analysis.js'),charts:typeof import('./preview-charts.js'),engine:typeof import('./engine.js')}} EditorModules */
+/** @typedef {{analysis:typeof import('./audio-profile-preview-analysis.js'),charts:typeof import('./audio-profile-preview-charts.js'),engine:typeof import('./audio-profile-engine.js')}} EditorModules */
 
 /** Load hash-versioned editor dependencies from same-origin view URLs.
  * @returns {Promise<EditorModules>} Loaded analysis, chart and DSP modules.

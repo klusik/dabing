@@ -1,7 +1,7 @@
 /*
  * Project: Dabing
  * Repository: klusik/dabing
- * File: public/assets/audio-profiles/compressor.js
+ * File: public/assets/audio-profile-compressor.js
  * Module Type: Browser DSP effect
  * Purpose: Compress dynamic peaks and apply make-up gain.
  * Responsibilities: Configure the native dynamics compressor and output gain.
