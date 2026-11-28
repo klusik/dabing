@@ -61,10 +61,12 @@ $classes = [
     'app/services/TakeNaming.php', 'app/services/ScriptImport.php',
     'app/services/RecordingStorage.php',
     'app/models/StudioModel.php', 'app/services/StudioService.php',
+    'app/models/AudioProfileModel.php', 'app/services/AudioProfileService.php',
     'app/services/InviteMailer.php', 'app/services/EmailInviteService.php',
     'app/controllers/AccountController.php', 'app/controllers/UpdateController.php',
     'app/controllers/UserAdminController.php',
     'app/controllers/StudioController.php',
+    'app/controllers/AudioProfileController.php',
     'app/controllers/EmailInviteController.php',
 ];
 foreach ($classes as $classFile) {
@@ -79,6 +81,8 @@ $routes = [
     'account' => ['GET', 'POST'],
     'logout' => ['POST'], 'users' => ['GET', 'POST'],
     'projects' => ['GET', 'POST'], 'project' => ['GET'],
+    'audio-profiles' => ['GET', 'POST'],
+    'assign-audio-profile' => ['POST'], 'audio-export' => ['GET'],
     'assign-voice' => ['POST'],
     'email-invite' => ['POST'], 'email-join' => ['GET', 'POST'],
     'update' => ['GET', 'POST'],
@@ -95,6 +99,7 @@ $jsonEndpoint = Http::wantsJson()
 $jsonResponse = $jsonEndpoint && in_array($route, [
     'project', 'assign-voice', 'email-invite', 'select-take',
     'delete-take', 'hide-take',
+    'assign-audio-profile', 'audio-export',
 ], true);
 
 try {
@@ -182,12 +187,22 @@ try {
     }
 
     $studio = new StudioController($database, $storage, $user);
+    $audioProfiles = new Dabing\AudioProfileController($database, $user);
     switch ($route) {
         case 'projects':
             $studio->projects();
             break;
         case 'project':
             $studio->project();
+            break;
+        case 'audio-profiles':
+            $audioProfiles->handle();
+            break;
+        case 'assign-audio-profile':
+            $audioProfiles->assign();
+            break;
+        case 'audio-export':
+            $audioProfiles->exportManifest();
             break;
         case 'assign-voice':
             $studio->assignVoice();

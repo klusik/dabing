@@ -49,6 +49,29 @@ Starší relace s platným otiskem hesla se proto zachovají. Každá následná
 deaktivace účtu nebo správcovský reset hesla zvýší verzi relace a zneplatní
 všechny starší relace, i pokud je účet znovu aktivován před jejich použitím.
 
+### Zvukové profily
+
+Migrace `0003_audio_profiles.php` přidává globální pojmenované profily a
+projektová přiřazení. Profily obsahují seřazený řetězec EQ, kompresoru,
+normalizace a dozvuku; nové profily mají všechny moduly vypnuté. Přiřazení
+může platit pro konkrétní nahrávku (take), repliku nebo kombinaci přesné
+postavy a hlasu. Neexistující přiřazení dědí nastavení; explicitní volba
+„Bez efektů“ dědění zastaví. Priorita je pokus, replika a potom pravidlo
+postavy a hlasu. Přiřazení repliky platí i pro budoucí pokusy. Globální editor
+otevřete ikonou noty v navigaci správce. V něm lze přehrát vzorovou nahrávku
+z projektu nebo místní zvukový soubor.
+
+Zvukové profily jsou globální a spravuje je administrátor. Nastavení se
+zobrazí pouze uživateli s přístupem do příslušného projektu. Hlasové a
+hlasová, řádková i jednotlivá přiřazení se nastavují v projektovém studiu.
+Stahování jednoho pokusu zachová originální název a bajty; upravená kopie má
+příponu `_effects.mp3`. Párový ZIP obsahuje originál i upravenou kopii.
+Export celé knihy nabízí původní ZIP a samostatný balíček s kopiemi pro
+nahrávky, které mají aktivní profil. V prohlížeči se společně zpracovává
+nejvýše 256 MiB. Zdroj může mít nejvýše 20 MiB a 181 sekund, výstup nejvýše
+184 sekund. Zpracování probíhá v prohlížeči; hosting WEDOS nepotřebuje
+zvukový backend ani FFmpeg.
+
 ### Aktualizace z verze 0.2.2
 
 Před aktualizací zálohujte databázi a úložiště. Nainstalujte vydání 0.3.0

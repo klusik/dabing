@@ -159,6 +159,69 @@ final class StudioController
         if ($view === null) {
             throw new HttpError(404, 'Kniha nebyla nalezena.');
         }
+        $audioModel = new AudioProfileModel($this->database);
+        $audioProfiles = $audioModel->profiles(
+            !empty($this->user['is_admin']) ? null : $projectId
+        );
+        $projectAudioProfiles = $audioModel->profiles($projectId);
+        $profileById = [];
+        foreach ($projectAudioProfiles as $audioProfile) {
+            $profileById[$audioProfile['id']] = $audioProfile;
+        }
+        $audioRules = [];
+        $lineOverrides = [];
+        $takeOverrides = [];
+        foreach ($audioModel->assignments($projectId) as $assignment) {
+            if ($assignment['scope'] === 'voice'
+                && $assignment['character_name'] !== null
+                && $assignment['user_id'] !== null) {
+                $audioRules[$assignment['character_name']][(string) $assignment['user_id']]
+                    = $assignment['profile_id'] ?? 0;
+            } elseif ($assignment['scope'] === 'line'
+                && $assignment['target_id'] !== null) {
+                $lineOverrides[$assignment['target_id']] = $assignment['profile_id'] ?? 0;
+            } elseif ($assignment['scope'] === 'take'
+                && $assignment['target_id'] !== null) {
+                $takeOverrides[$assignment['target_id']] = $assignment['profile_id'] ?? 0;
+            }
+        }
+        $hasAudioEffects = false;
+        foreach ($projectAudioProfiles as $audioProfile) {
+            foreach ($audioProfile['chain'] as $module) {
+                if (!empty($module['enabled'])) {
+                    $hasAudioEffects = true;
+                    break 2;
+                }
+            }
+        }
+        $view['audio_profiles'] = $audioProfiles;
+        $view['audio_voice_rules'] = $audioRules;
+        $view['audio_has_effects'] = $hasAudioEffects;
+        foreach ($view['chapters'] as &$audioChapter) {
+            foreach ($audioChapter['lines'] as &$audioLine) {
+                $lineId = $audioLine['id'];
+                $audioLine['audio_profile_override'] = $lineOverrides[$lineId] ?? null;
+                $character = $audioLine['character'];
+                foreach ($audioLine['takes'] as &$audioTake) {
+                    $takeId = $audioTake['id'];
+                    $audioTake['audio_profile_override'] = $takeOverrides[$takeId] ?? null;
+                    $takeActorId = $audioTake['user_id'];
+                    $takeVoiceChoice = $takeActorId === null
+                        ? null : ($audioRules[$character][(string) $takeActorId] ?? null);
+                    $effective = array_key_exists($takeId, $takeOverrides)
+                        ? $takeOverrides[$takeId]
+                        : ($audioLine['audio_profile_override'] !== null
+                            ? $audioLine['audio_profile_override'] : $takeVoiceChoice);
+                    $audioTake['audio_profile_id'] = is_int($effective)
+                        && $effective > 0
+                        && isset($profileById[$effective])
+                        ? $effective : null;
+                }
+                unset($audioTake);
+            }
+            unset($audioLine);
+        }
+        unset($audioChapter);
         $filterVoices = $view['voices'];
         $collator = class_exists(\Collator::class)
             ? new \Collator('cs_CZ') : null;
@@ -211,6 +274,17 @@ final class StudioController
                 'id' => $track['recording_id'],
                 'download' => 1,
             ]);
+            $takeId = $track['recording_id'];
+            $lineId = $track['line_id'];
+            $lineChoice = $lineOverrides[$lineId] ?? null;
+            $voiceChoice = $track['user_id'] === null ? null
+                : ($audioRules[$track['character']][(string) $track['user_id']] ?? null);
+            $effective = array_key_exists($takeId, $takeOverrides)
+                ? $takeOverrides[$takeId]
+                : ($lineChoice !== null ? $lineChoice : $voiceChoice);
+            $track['audio_profile_id'] = is_int($effective)
+                && $effective > 0 && isset($profileById[$effective])
+                ? $effective : null;
         }
         unset($track);
         $view['can_invite'] = $view['project']['role'] === 'owner';

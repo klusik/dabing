@@ -60,10 +60,11 @@ const SAMPLES_PER_CHUNK = 1152;
  * Units: seconds
  * Scope: one audio conversion request
  * Consumers: maximum sample count
- * Rationale: match the recorder's 180-second take cap.
- * Value: 180
+ * Rationale: allow 180-second recordings plus up to four seconds of rendered
+ * audio tail while keeping the upload source limit enforced by the recorder.
+ * Value: 184
  */
-const MAX_TAKE_SECONDS = 180;
+const MAX_TAKE_SECONDS = 184;
 
 /**
  * Maximum mono input length.
@@ -71,8 +72,8 @@ const MAX_TAKE_SECONDS = 180;
  * Units: Int16 samples
  * Scope: one conversion request at the target sample rate
  * Consumers: PCM validation and encoder loop
- * Rationale: bound worker memory and CPU to 180 seconds.
- * Value: 7938000
+ * Rationale: bound worker memory and CPU to the maximum processed export length.
+ * Value: 8114400
  */
 const MAX_INPUT_SAMPLES = TARGET_SAMPLE_RATE_HZ * MAX_TAKE_SECONDS;
 
@@ -82,7 +83,7 @@ const MAX_INPUT_SAMPLES = TARGET_SAMPLE_RATE_HZ * MAX_TAKE_SECONDS;
  * Units: bytes
  * Scope: one MP3 output buffer
  * Consumers: chunk accumulation and final allocation
- * Rationale: bound output allocation above a 180-second 128 kbps stream.
+ * Rationale: bound output allocation above a 184-second 128 kbps stream.
  * Value: 4194304
  */
 const MAX_OUTPUT_BYTES = 4194304;

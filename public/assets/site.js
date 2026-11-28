@@ -1168,13 +1168,25 @@ function bindPlaylist() {
         root.dataset.pendingPlaylistLineId = lineId;
         void refreshProjectView(root, target.href, 'push', true);
     };
-    const playIndex = (index, shouldPlay) => {
+    const playIndex = async (index, shouldPlay) => {
         const currentItems = items();
         if (index < 0 || index >= currentItems.length) return;
         const item = currentItems[index];
         state.currentIndex = index;
         state.currentId = item.dataset.recordingId ?? item.dataset.src ?? '';
-        player.src = item.dataset.src ?? '';
+        const playbackId = state.currentId;
+        let source = item.dataset.src ?? '';
+        try {
+            if (typeof window.dabingAudioPlaybackUrl === 'function') {
+                source = await window.dabingAudioPlaybackUrl(item);
+            }
+        } catch (error) {
+            if (status()) status().textContent = error instanceof Error
+                ? error.message : 'Zvukové efekty se nepodařilo zpracovat.';
+            return;
+        }
+        if (playbackId !== state.currentId) return;
+        player.src = source;
         player.load();
         const currentStatus = status();
         if (currentStatus) {
@@ -1462,18 +1474,25 @@ function syncProjectShell(current, next) {
         actionForm?.querySelector('button')?.focus({ preventScroll: true });
     }
 
-    const currentZip = current.querySelector('.zip-export-control');
-    const nextZip = next.querySelector('.zip-export-control');
-    if (currentZip && nextZip) {
-        currentZip.href = nextZip.href;
-    } else if (currentZip) {
-        currentZip.remove();
-    } else if (nextZip) {
-        current.querySelector('.studio-toolbar-actions')?.append(nextZip);
-    }
+    const syncExportControl = (selector, update) => {
+        const currentControl = current.querySelector(selector);
+        const nextControl = next.querySelector(selector);
+        if (currentControl && nextControl) update(currentControl, nextControl);
+        else if (currentControl) currentControl.remove();
+        else if (nextControl) current.querySelector('.studio-toolbar-actions')?.append(nextControl);
+    };
+    syncExportControl('a.zip-export-control:not([data-audio-book-export])', (button, fresh) => {
+        button.href = fresh.href;
+    });
+    syncExportControl('[data-audio-book-export]', (button, fresh) => {
+        button.dataset.url = fresh.dataset.url ?? '';
+        button.title = fresh.title;
+        button.setAttribute('aria-label', fresh.getAttribute('aria-label') ?? '');
+    });
 
     current.dataset.revision = next.dataset.revision ?? '';
     current.dataset.pagingEnabled = next.dataset.pagingEnabled ?? 'off';
+    current.dataset.audioProfiles = next.dataset.audioProfiles ?? '[]';
 }
 
 /**

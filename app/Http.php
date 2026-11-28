@@ -358,6 +358,14 @@ final class Http
      *     revision?:string,pagination?:array{page:int,pages:int,total:int,enabled?:bool},
      *     playlist?:list<array{recording_id:int,line_id:int,line_number:int,line_page:int,in_filter:bool,character:string,chapter_title:string,attempt_no:int,media_type:string,file_name:string,audio_url:string,download_url:string}>,
      *     current_version?:string,latest_release?:array{version:string,url:string,sha256:string,size:int}|null,
+     *     audio_profiles?:list<array{id:int,name:string,chain:list<array<string,mixed>>}>,
+     *     audio_voice_rules?:array<string,array<string,int|null>>,
+     *     audio_has_effects?:bool,
+     *     profile?:array{id:int,name:string,chain:list<array<string,mixed>>}|null,
+     *     default_chain?:list<array{type:string,enabled:bool,settings:array<string,mixed>}>,
+     *     sample?:array{id:int,url:string,label:string}|null,
+     *     form_error?:string|null,submitted_name?:string|null,
+     *     submitted_chain_json?:string|null,profile_id?:int|null,
      *     can_invite?:bool,has_recordings?:bool,is_admin?:bool,export_url?:string,
      *     invite_valid?:bool,existing_account?:bool,wrong_account?:bool,
      *     recipient_email?:string,project_title?:string,code?:string,roles?:list<string>,
@@ -379,6 +387,7 @@ final class Http
             'account' => 'account.php',
             'projects' => 'projects.php', 'users' => 'users.php',
             'project' => 'project.php', 'email-join' => 'email-invite-join.php',
+            'audio-profiles' => 'audio-profiles.php',
             'update' => 'update.php', 'error' => 'error.php',
         ];
         if (!isset($templates[$view])) {

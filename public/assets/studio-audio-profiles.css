@@ -1,0 +1,45 @@
+/* Project: Dabing
+ * Repository: klusik/dabing
+ * File: public/assets/studio-audio-profiles.css
+ * Module Type: Stylesheet
+ * Purpose: Keep audio profile controls compact in the recording workspace.
+ * Responsibilities: Style assignment selectors and accessible progress states.
+ * Author: Rudolf Klusal
+ * License: All rights reserved
+ */
+.audio-profile-bulk { align-self: center; }
+.audio-profile-popover form { display: grid; gap: .45rem; min-width: min(18rem, 76vw); }
+.audio-profile-popover label { display: grid; gap: .15rem; font-size: .78rem; }
+.audio-profile-popover select,
+.line-identity form select,
+.take-row form select {
+    max-width: 10rem;
+    min-height: 2rem;
+    border: 1px solid var(--line, rgba(45, 65, 55, .2));
+    border-radius: .55rem;
+    padding: .25rem .45rem;
+    color: var(--ink, #263b32);
+    background: var(--surface, rgba(255, 255, 255, .78));
+    font: inherit;
+    font-size: .76rem;
+}
+.line-identity form,
+.take-row form[data-audio-profile-assignment] { display: inline-flex; margin: 0; }
+.audio-profile-popover select:focus-visible,
+.line-identity form select:focus-visible,
+.take-row form select:focus-visible {
+    outline: 2px solid var(--forest, #38634e);
+    outline-offset: 2px;
+}
+[data-audio-double-download][aria-busy="true"] { opacity: .55; pointer-events: none; }
+.project-action-status[data-audio-feedback]:not(:empty) {
+    flex-basis: 100%;
+    margin: .25rem 0 0;
+    color: var(--forest-deep, #274536);
+    font-size: .78rem;
+}
+@media (max-width: 700px) {
+    .audio-profile-popover { inset-inline: auto 0; max-width: calc(100vw - 2rem); }
+    .line-identity form select,
+    .take-row form select { max-width: 8rem; min-height: 2.5rem; }
+}
