@@ -87,10 +87,17 @@ final class EmailInviteService
      * @param int $ownerId Authenticated owner.
      * @param string $email Submitted address.
      * @param list<string> $roles Requested exact character names.
+     * @param string $adminEmail Email from the refreshed authenticated account.
      * @return void No return value.
      * @throws FormError When owner, address, role, quota, or delivery is invalid.
      */
-    public function sendToProject(int $projectId, int $ownerId, string $email, array $roles = []): void
+    public function sendToProject(
+        int $projectId,
+        int $ownerId,
+        string $email,
+        array $roles,
+        string $adminEmail
+    ): void
     {
         $this->requireOwner($projectId, $ownerId);
         $email = mb_strtolower(trim($email));
@@ -108,7 +115,7 @@ final class EmailInviteService
         $id = $this->invites->issue(
             $projectId, $ownerId, $email, $roles, $hash, $this->expiry()
         );
-        $this->deliver($id, $email, $code, $hash, $roles);
+        $this->deliver($id, $email, $code, $hash, $roles, $adminEmail);
     }
 
     /** Grant selected roles to an existing account and notify only for new grants.
@@ -116,6 +123,7 @@ final class EmailInviteService
      * @param int $adminId Active administrator performing the change.
      * @param int $userId Existing recipient account.
      * @param list<string> $roles Exact selected book roles.
+     * @param string $adminEmail Email from the refreshed authenticated account.
      * @return array{email:string,project_title:string,roles:list<string>} Grant details and newly assigned roles.
      * @throws FormError When roles are invalid or notification delivery fails after grants save.
      * @throws HttpError When the actor is not an active administrator.
@@ -124,7 +132,8 @@ final class EmailInviteService
         int $projectId,
         int $adminId,
         int $userId,
-        array $roles
+        array $roles,
+        string $adminEmail
     ): array {
         $grant = (new UserAdminService($this->database))->grantRoles(
             $adminId,
@@ -140,7 +149,8 @@ final class EmailInviteService
                 $grant['email'],
                 $projectId,
                 $grant['project_title'],
-                $grant['roles']
+                $grant['roles'],
+                $adminEmail
             );
         } catch (Throwable) {
             $sent = false;
@@ -171,9 +181,15 @@ final class EmailInviteService
      * @param int $projectId Parent book.
      * @param int $ownerId Authenticated owner.
      * @param int $inviteId Invitation row identifier.
+     * @param string $adminEmail Email from the refreshed authenticated account.
      * @return void No return value.
      */
-    public function resend(int $projectId, int $ownerId, int $inviteId): void
+    public function resend(
+        int $projectId,
+        int $ownerId,
+        int $inviteId,
+        string $adminEmail
+    ): void
     {
         $this->requireOwner($projectId, $ownerId);
         $code = bin2hex(random_bytes(16));
@@ -184,7 +200,9 @@ final class EmailInviteService
         if ($row === null) {
             throw new FormError('Pozvánku se nepodařilo obnovit.');
         }
-        $this->deliver($row['id'], $row['email'], $code, $hash, $row['roles']);
+        $this->deliver(
+            $row['id'], $row['email'], $code, $hash, $row['roles'], $adminEmail
+        );
     }
 
     /** Deliver a previously persisted invite, recording failures without retaining a usable token.
@@ -193,9 +211,17 @@ final class EmailInviteService
      * @param string $code Raw one-use code.
      * @param string $hash Expected stored digest.
      * @param list<string> $roles Selected exact roles.
+     * @param string $adminEmail Email from the refreshed authenticated account.
      * @return void No return value.
      */
-    private function deliver(int $id, string $email, string $code, string $hash, array $roles): void
+    private function deliver(
+        int $id,
+        string $email,
+        string $code,
+        string $hash,
+        array $roles,
+        string $adminEmail
+    ): void
     {
         try {
             $sentAt = gmdate('Y-m-d H:i:s');
@@ -203,7 +229,11 @@ final class EmailInviteService
                 ->modify('+' . self::INVITE_TTL_SECONDS . ' seconds')
                 ->format('Y-m-d H:i:s');
             if (!$this->mailer->sendInvite(
-                $email, $code, $roles, $this->localDate($expiry)
+                $email,
+                $code,
+                $roles,
+                $this->localDate($expiry),
+                $adminEmail
             )
                 || !$this->invites->markDelivered($id, $hash, $sentAt, $expiry)) {
                 throw new FormError('E-mail se nepodařilo odeslat. Zkontrolujte nastavení pošty.');

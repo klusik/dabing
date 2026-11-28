@@ -133,9 +133,19 @@ function auditMailTransport(): void
     }
     $capturePath = $directory . DIRECTORY_SEPARATOR . 'messages.txt';
     $captureCommand = $directory . DIRECTORY_SEPARATOR . 'capture.sh';
+    $configuredStorage = $directory . DIRECTORY_SEPARATOR . 'configured';
+    $stage = 'prepare isolated capture';
+    $safeDetail = null;
     try {
+        if (!mkdir($configuredStorage, 0700)) {
+            throw new RuntimeException('Configured mail fixture directory failed.');
+        }
         $captureScript = "#!/bin/sh\n"
-            . 'printf "\\n--DABING-ARGS-- %s\\n" "$*" >> '
+            . 'printf "\\n--DABING-ARGS-BEGIN--\\n" >> '
+            . escapeshellarg($capturePath) . "\n"
+            . 'printf "<%s>\\n" "$@" >> '
+            . escapeshellarg($capturePath) . "\n"
+            . 'printf "%s\\n" "--DABING-MESSAGE-BEGIN--" >> '
             . escapeshellarg($capturePath) . "\n"
             . 'cat >> ' . escapeshellarg($capturePath) . "\n"
             . 'printf "\\n--DABING-END--\\n" >> '
@@ -146,77 +156,242 @@ function auditMailTransport(): void
         chmod($captureCommand, 0700);
 
         $root = dirname(__DIR__);
+        $configuredFrom = 'mailer@transport.test';
+        $mailConfig = '<?php return ' . var_export([
+            'from' => $configuredFrom,
+        ], true) . ';' . PHP_EOL;
+        if (file_put_contents(
+            $configuredStorage . DIRECTORY_SEPARATOR . 'mail.php',
+            $mailConfig
+        ) === false) {
+            throw new RuntimeException('Configured mail fixture failed.');
+        }
+        $sender = 'admin+tag@example.test';
+        $externalAdmin = 'manager+reply@external.test';
         $childCode = 'require ' . var_export($root . '/app/FormError.php', true) . ';'
             . 'require ' . var_export($root . '/app/Http.php', true) . ';'
             . 'require ' . var_export($root . '/app/services/InviteMailer.php', true) . ';'
-            . '$_SERVER["HTTP_HOST"] = "dabing.test";'
-            . '$_SERVER["REQUEST_URI"] = "/studio/index.php";'
-            . '$storage = ' . var_export($directory, true) . ';'
-            . 'if (file_exists($storage . "/mail.php")) { exit(21); }'
-            . '$mailer = new \\Dabing\\InviteMailer($storage);'
+            . '$_SERVER["HTTP_HOST"] = "books.example.test:8443";'
+            . '$_SERVER["REQUEST_URI"] = "/subdir/index.php";'
+            . '$defaultStorage = ' . var_export($directory, true) . ';'
+            . '$configuredStorage = ' . var_export($configuredStorage, true) . ';'
+            . 'if (file_exists($defaultStorage . "/mail.php")) { exit(21); }'
+            . '$mailer = new \\Dabing\\InviteMailer($defaultStorage);'
+            . '$adminSender = ' . var_export($sender, true) . ';'
+            . '$externalAdmin = ' . var_export($externalAdmin, true) . ';'
             . 'if (!$mailer->sendInvite("invite@dabing.test",'
             . '"0123456789abcdef0123456789abcdef", ["Rook"],'
-            . '"28. 11. 2026 12:00 Europe/Prague")) { exit(22); }'
+            . '"28. 11. 2026 12:00 Europe/Prague", $adminSender)) { exit(22); }'
             . 'if (!$mailer->sendRoleAssignmentNotice("voice@dabing.test",'
-            . '73, "Test book", ["Rook", "Guard"])) { exit(23); }';
-        $sendmailPath = '/bin/sh ' . escapeshellarg($captureCommand);
+            . '73, "Test book", ["Rook", "Guard"], $adminSender)) { exit(23); }'
+            . 'if (!$mailer->sendInvite("external@dabing.test",'
+            . '"11223344556677889900aabbccddeeff", [],'
+            . '"28. 11. 2026 12:00 Europe/Prague", $externalAdmin)) { exit(24); }'
+            . '$configuredMailer = new \\Dabing\\InviteMailer($configuredStorage);'
+            . 'if (!$configuredMailer->sendRoleAssignmentNotice("configured@dabing.test",'
+            . '74, "Configured book", ["Pilot"], $externalAdmin)) { exit(25); }'
+            . '$invalidAdmin = "admin" . chr(10) . "@books.example.test";'
+            . 'if (!$mailer->sendInvite("invalid-admin@dabing.test",'
+            . '"ffeeddccbbaa00998877665544332211", [],'
+            . '"28. 11. 2026 12:00 Europe/Prague", $invalidAdmin)) { exit(26); }';
+        $sendmailPath = '/bin/sh ' . escapeshellarg($captureCommand) . ' -t -i';
+        $stage = 'run PHP mail fixtures';
         $result = runCommand([
             PHP_BINARY,
+            '-n',
             '-d',
             'sendmail_path=' . $sendmailPath,
             '-r',
             $childCode,
         ]);
         if ($result['status'] !== 0) {
-            throw new RuntimeException('Native mail capture subprocess failed.');
+            $stage = 'run PHP mail fixtures (exit code '
+                . $result['status'] . ')';
+            throw new RuntimeException('PHP fixture subprocess failed.');
         }
+        $stage = 'read sendmail capture';
         $capture = file_get_contents($capturePath);
         if (!is_string($capture)) {
             throw new RuntimeException('Native mail capture was not created.');
         }
+        $stage = 'parse captured messages';
         $matchCount = preg_match_all(
-            '/--DABING-ARGS-- ([^\r\n]*)\r?\n(.*?)\r?\n--DABING-END--/s',
+            '/--DABING-ARGS-BEGIN--\r?\n((?:<[^>\r\n]*>\r?\n)*)'
+            . '--DABING-MESSAGE-BEGIN--\r?\n(.*?)\r?\n--DABING-END--/s',
             $capture,
             $matches,
             PREG_SET_ORDER
         );
-        if ($matchCount !== 2) {
-            throw new RuntimeException('Native mail capture did not contain two messages.');
+        if ($matchCount !== 5) {
+            throw new RuntimeException('Native mail capture did not contain five messages.');
         }
+        $stage = 'validate sender and message assertions';
+        $headersByMessage = [];
         $messages = [];
+        $argumentsByMessage = [];
         foreach ($matches as $match) {
-            $arguments = (string) $match[1];
+            $rawArguments = (string) $match[1];
+            preg_match_all('/^<([^>\r\n]*)>$/m', $rawArguments, $argumentMatches);
+            $argumentsByMessage[] = array_values($argumentMatches[1]);
             $rawMessage = (string) $match[2];
-            if (preg_match('/(?:\A|\s)-f(?:\s|\z)/', $arguments) === 1
-                || preg_match('/^From:/mi', $rawMessage) === 1) {
+            $messageParts = preg_split('/\r?\n\r?\n/', $rawMessage, 2);
+            if (!is_array($messageParts) || count($messageParts) !== 2) {
+                throw new RuntimeException('Captured message headers were incomplete.');
+            }
+            $headersByMessage[] = $messageParts[0];
+            $messages[] = quoted_printable_decode($messageParts[1]);
+        }
+        $headerValue = static function (string $message, string $header): ?string {
+            if (preg_match('/^' . preg_quote($header, '/')
+                . ':\\s*([^\\r\\n]*)/mi', $message, $headerMatch) !== 1) {
+                return null;
+            }
+            return trim((string) $headerMatch[1]);
+        };
+        $displayMailbox = static function (?string $mailbox) use (
+            $sender,
+            $externalAdmin,
+            $configuredFrom
+        ): string {
+            if ($mailbox === null) {
+                return '<absent>';
+            }
+            return in_array(
+                $mailbox,
+                [$sender, $externalAdmin, $configuredFrom],
+                true
+            ) ? $mailbox : '<other>';
+        };
+        $displayArguments = static function (array $arguments) use (
+            $sender,
+            $externalAdmin,
+            $configuredFrom
+        ): string {
+            $safeArguments = array_map(
+                static function (string $argument) use (
+                    $sender,
+                    $externalAdmin,
+                    $configuredFrom
+                ): string {
+                    return in_array(
+                        $argument,
+                        ['-t', '-i', '-f', $sender, $externalAdmin, $configuredFrom],
+                        true
+                    ) ? $argument : '<other>';
+                },
+                $arguments
+            );
+            return '[' . implode(' ', $safeArguments) . ']';
+        };
+        $expectedFrom = [
+            $sender,
+            $sender,
+            null,
+            $configuredFrom,
+            null,
+        ];
+        $expectedReplyTo = [
+            null,
+            null,
+            $externalAdmin,
+            $externalAdmin,
+            null,
+        ];
+        $expectedEnvelope = [
+            $sender,
+            $sender,
+            null,
+            $configuredFrom,
+            null,
+        ];
+        foreach ($messages as $index => $message) {
+            $stage = 'validate message ' . ($index + 1) . ' sender and arguments';
+            $headers = $headersByMessage[$index];
+            $from = $headerValue($headers, 'From');
+            $replyTo = $headerValue($headers, 'Reply-To');
+            $expectedArguments = $expectedEnvelope[$index] === null
+                ? ['-t', '-i']
+                : ['-t', '-i', '-f', $expectedEnvelope[$index]];
+            if ($from !== $expectedFrom[$index]) {
+                $safeDetail = 'From mismatch: expected '
+                    . $displayMailbox($expectedFrom[$index]) . ', got '
+                    . $displayMailbox($from) . '.';
                 throw new RuntimeException(
-                    'Mail fallback supplied an unconfigured sender override.'
+                    'Mail From assertion failed.'
                 );
             }
-            $messages[] = quoted_printable_decode($rawMessage);
+            if ($replyTo !== $expectedReplyTo[$index]) {
+                $safeDetail = 'Reply-To mismatch: expected '
+                    . $displayMailbox($expectedReplyTo[$index]) . ', got '
+                    . $displayMailbox($replyTo) . '.';
+                throw new RuntimeException(
+                    'Mail Reply-To assertion failed.'
+                );
+            }
+            if ($argumentsByMessage[$index] !== $expectedArguments) {
+                $safeDetail = 'sendmail argv mismatch: expected '
+                    . $displayArguments($expectedArguments) . ', got '
+                    . $displayArguments($argumentsByMessage[$index]) . '.';
+                throw new RuntimeException(
+                    'Mail envelope assertion failed.'
+                );
+            }
+            if (!str_contains($headers, 'multipart/alternative')
+                || !str_contains(
+                    $message,
+                    'http://books.example.test:8443/subdir/?route='
+                )
+                || $headerValue($headers, 'To') !== [
+                    'invite@dabing.test',
+                    'voice@dabing.test',
+                    'external@dabing.test',
+                    'configured@dabing.test',
+                    'invalid-admin@dabing.test',
+                ][$index]) {
+                throw new RuntimeException(
+                    'Captured recipient, MIME type, or public base URL was incorrect.'
+                );
+            }
         }
-        if (!str_contains($messages[0], 'invite@dabing.test')
-            || !str_contains($messages[0], 'route=email-join')
-            || !str_contains($messages[0], '0123456789abcdef0123456789abcdef')
-            || !str_contains($messages[0], 'multipart/alternative')
-            || !str_contains($messages[1], 'voice@dabing.test')
-            || !str_contains($messages[1], 'route=project&id=73')
-            || !str_contains($messages[1], 'Rook')
-            || !str_contains($messages[1], 'Guard')
-            || !str_contains($messages[1], 'multipart/alternative')) {
-            throw new RuntimeException(
-                'Captured invitation or book-role message content was incorrect.'
-            );
+        $expectedContent = [
+            ['route=email-join', '0123456789abcdef0123456789abcdef'],
+            ['route=project&id=73', 'Rook', 'Guard'],
+            ['route=email-join'],
+            ['route=project&id=74', 'Pilot'],
+            [],
+        ];
+        foreach ($expectedContent as $index => $needles) {
+            $stage = 'validate message ' . ($index + 1) . ' route and content';
+            foreach ($needles as $needle) {
+                if (!str_contains($messages[$index], $needle)) {
+                    throw new RuntimeException('Captured message content mismatch.');
+                }
+            }
         }
         fwrite(STDOUT,
-            "PASS native mail fallback: invitation and book-role MIME messages "
-            . "captured without configured From overrides.\n"
+            "PASS native mail fallback: default, external, configured, and invalid "
+            . "admin sender cases preserve MIME and routing.\n"
+        );
+    } catch (Throwable $error) {
+        throw new RuntimeException(
+            'Native mail audit failed during ' . $stage . ' ('
+            . get_class($error) . ').'
+            . ($safeDetail === null ? '' : ' ' . $safeDetail),
+            0,
+            $error
         );
     } finally {
-        foreach ([$capturePath, $captureCommand] as $path) {
+        foreach ([
+            $capturePath,
+            $captureCommand,
+            $configuredStorage . DIRECTORY_SEPARATOR . 'mail.php',
+        ] as $path) {
             if (is_file($path) && !is_link($path)) {
                 unlink($path);
             }
+        }
+        if (is_dir($configuredStorage) && !is_link($configuredStorage)) {
+            rmdir($configuredStorage);
         }
         if (is_dir($directory) && !is_link($directory)) {
             rmdir($directory);
@@ -537,7 +712,11 @@ function auditSchema(): void
 try {
     $files = trackedFiles();
     auditSources($files);
-    auditMailTransport();
+    try {
+        auditMailTransport();
+    } catch (RuntimeException $error) {
+        fail($error->getMessage());
+    }
     auditSchema();
 } catch (Throwable $error) {
     fail('Audit could not complete (' . get_class($error) . ').');

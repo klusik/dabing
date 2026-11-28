@@ -28,9 +28,10 @@ final class EmailInviteController
 
     /** Send an owner-authorized invitation without exposing its code.
      * @param int $ownerId Authenticated owner identifier.
+     * @param string $adminEmail Email from the refreshed authenticated account.
      * @return void No return value.
      */
-    public function send(int $ownerId): void
+    public function send(int $ownerId, string $adminEmail): void
     {
         if (Http::method() !== 'POST') {
             throw new HttpError(405, 'Metoda není povolena.');
@@ -47,7 +48,9 @@ final class EmailInviteController
             if ($action === 'cancel' && $inviteId !== null) {
                 $this->service->cancel($projectId, $ownerId, $inviteId);
             } elseif ($action === 'resend' && $inviteId !== null) {
-                $this->service->resend($projectId, $ownerId, $inviteId);
+                $this->service->resend(
+                    $projectId, $ownerId, $inviteId, $adminEmail
+                );
             } elseif ($action === 'send') {
                 $roles = $_POST['roles'] ?? [];
                 if (Http::post('roles_end') !== '1'
@@ -71,7 +74,8 @@ final class EmailInviteController
                         $projectId,
                         $ownerId,
                         $recipientUserId,
-                        $roles
+                        $roles,
+                        $adminEmail
                     );
                     $successMessage = $grant['roles'] === []
                         ? 'Vybrané postavy již účtu patřily; e-mail nebyl odeslán.'
@@ -81,7 +85,8 @@ final class EmailInviteController
                         $projectId,
                         $ownerId,
                         Http::post('email'),
-                        $roles
+                        $roles,
+                        $adminEmail
                     );
                     $successMessage = 'E-mailová pozvánka byla odeslána.';
                 }

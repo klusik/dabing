@@ -23,15 +23,14 @@ zpracování `.htaccess`. Pro mikrofon otevřete web přes HTTPS nebo na
    v chráněném `storage/config.php`. Pro zálohu uchovávejte databázi a neveřejný
    adresář `storage`, zejména `storage/recordings/`.
 
-Na WEDOSu použijte server, název databáze a jeden databázový účet z administrace
-hostingu. Tento účet musí mít oprávnění vytvářet tabulky. Nahrajte obsah složky
-`dabing/` z ověřeného ZIP balíčku do `www/subdom/dabing`, včetně `.htaccess`,
-a otevřete `https://dabing.klusik.cz/`. Starší instalace může mít v
-`storage/config.php` nastavení `base_url`. Nová instalace používá relativní
-odkazy a veřejnou adresu nevyžaduje.
-
-- [Dokumentace databází WEDOS](https://kb.vedos.cz/webhosting-databaze/)
-- [Dokumentace konfigurace PHP WEDOS](https://kb.vedos.cz/webhosting-php/)
+Na běžném PHP/Apache hostingu použijte údaje databáze a účet z administrace
+hostingu. Databázový účet musí při instalaci umět vytvářet tabulky. Nahrajte
+obsah ověřeného balíčku do kořene webu nebo jeho veřejného podadresáře.
+Zachovejte `.htaccess`, povolte `mod_rewrite` a ověřte, že přepis interně směruje požadavky
+na `index.php`, ale nemění veřejnou cestu aplikace. Otevřete veřejnou adresu,
+kam jste soubory umístili. Starší instalace může mít v `storage/config.php`
+nastavení `base_url`. Nová instalace používá relativní odkazy a veřejnou adresu
+pro běžnou navigaci nevyžaduje.
 
 Import scénáře má strop 20 MB (20 000 000 bajtů). Při nahrávání souboru
 aplikace zohlední také `upload_max_filesize` a `post_max_size` s rezervou
@@ -170,10 +169,17 @@ pro velikost archivu.
 ## Pošta pro pozvánky
 
 E-mailové pozvánky i oznámení o přiřazení postav používají standardní PHP
-`mail()`. Soubor `storage/mail.php` je volitelný. Pokud chybí, serverový
-transport PHP zvolí odesílatele i návratovou cestu. WEDOS uvádí výchozí poštovní
-server hostingu a pro lepší doručitelnost doporučuje odesílatele na vaší doméně.
-[Nastavení pošty WEDOS](https://kb.vedos.cz/maily-blokovani/)
+`mail()`. Bez souboru `storage/mail.php` použije Dabing adresu přihlášeného
+správce jako hlavičku `From` i odesílatele obálky, pokud web běží na stejné
+doméně jako jeho schránka nebo na její subdoméně. Například adresa
+`admin@example.cz` může být odesílatelem webu `dabing.example.cz`. V opačném
+případě zůstane odesílatelem adresa nastavená serverem a adresa správce se
+použije jako `Reply-To`.
+
+Pokud soubor `storage/mail.php` existuje, musí obsahovat platnou adresu `from`,
+která přepíše automatický výběr. Pokud se liší od adresy správce, adresa správce
+se použije jako `Reply-To`. Správně nastavené SPF nebo DKIM pro odesílací doménu
+může podpořit ověření zprávy, ale nezaručuje doručení ani umístění mimo spam.
 
 Pokud chcete nastavit vlastního odesílatele, zkopírujte
 `config/mail.example.php` do neveřejného `storage/mail.php` a změňte `from` na
@@ -208,24 +214,27 @@ v tomto požadavku a připojí se ke stejnému serveru a databázi.
 
 ### Balík vydání
 
-Z ověřené revize sestavte balík mimo pracovní kopii.
+Po samostatném schválení stabilního vydání integrujte ověřený stav do `main`
+schváleným postupem, který respektuje ochrany větve. Ověřte přesný commit na
+`origin/main` a z něj sestavte balík mimo pracovní kopii.
 
 ```sh
-php scripts/build-update.php 0.2.1 ../dabing-0.2.1.zip
+php scripts/build-update.php 0.2.2 ../dabing-0.2.2.zip
 ```
 
-Balík `dabing-0.2.1.zip` patří jako asset ke stabilnímu vydání s přesným tagem
-`0.2.1` v `klusik/dabing`. Updater přijímá také značku `v` před verzí.
-Příkazy po schválení vydání:
+Balík `dabing-0.2.2.zip` patří jako asset ke stabilnímu vydání s přesným tagem
+`0.2.2` v `klusik/dabing`. Updater přijímá také značku `v` před verzí.
+Po schválení vydání označte ověřený commit `origin/main` a odešlete tag.
 
 ```sh
-git tag 0.2.1
-git push origin refs/tags/0.2.1
+git tag 0.2.2 origin/main
+git push origin refs/tags/0.2.2
 ```
 Verze balíku musí odpovídat tagu a GitHub musí k assetu uvádět kontrolní součet
 SHA-256. Archiv má jediný kořen
 `dabing/`.
-Na WEDOSu nasazujte obsah složky podle umístění uvedeného výše.
+Na PHP/Apache hostingu nasazujte obsah složky aplikace do jejího veřejného
+adresáře a zachovejte ochranu neveřejného úložiště.
 
 Migrace jsou soubory `database/migrations/0001_nazev.php`, které vracejí
 seznam SQL příkazů. Probíhají v pořadí názvů souborů. Dokončenou migraci

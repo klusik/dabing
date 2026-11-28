@@ -37,6 +37,7 @@ final class InviteMailer
      * @param string $code Lowercase 32-character one-time code.
      * @param list<string> $roles Optional voice roles described in the message.
      * @param string $expiresAt Prague-local expiry date and time with zone.
+     * @param string $adminEmail Email from the refreshed authenticated account.
      * @return bool True when PHP mail accepted the message.
      * @throws FormError When configuration or same-origin request URL is invalid.
      */
@@ -44,7 +45,8 @@ final class InviteMailer
         string $recipient,
         string $code,
         array $roles,
-        string $expiresAt
+        string $expiresAt,
+        string $adminEmail
     ): bool
     {
         if (filter_var($recipient, FILTER_VALIDATE_EMAIL) === false
@@ -78,8 +80,15 @@ final class InviteMailer
             . "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
             . quoted_printable_encode($html) . "\r\n--{$boundary}--\r\n";
         $encodedSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
-        $headers = $this->messageHeaders($boundary, $config['from']);
-        return $this->sendComposed($recipient, $encodedSubject, $body, $headers, $config);
+        return $this->sendComposed(
+            $recipient,
+            $encodedSubject,
+            $body,
+            $boundary,
+            $baseUrl,
+            $adminEmail,
+            $config,
+        );
     }
 
     /** Send an informational message after an existing account receives roles.
@@ -87,6 +96,7 @@ final class InviteMailer
      * @param int $projectId Target book identifier.
      * @param string $projectTitle Book title from the grant transaction.
      * @param list<string> $roles Newly assigned exact roles.
+     * @param string $adminEmail Email from the refreshed authenticated account.
      * @return bool True when the configured transport accepts the message.
      * @throws FormError When recipient, book, roles, or mail configuration is invalid.
      */
@@ -94,7 +104,8 @@ final class InviteMailer
         string $recipient,
         int $projectId,
         string $projectTitle,
-        array $roles
+        array $roles,
+        string $adminEmail
     ): bool {
         if (filter_var($recipient, FILTER_VALIDATE_EMAIL) === false
             || $projectId < 1 || $roles === []) {
@@ -129,15 +140,24 @@ final class InviteMailer
             . "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
             . quoted_printable_encode($html) . "\r\n--{$boundary}--\r\n";
         $subject = '=?UTF-8?B?' . base64_encode('Nové přiřazení postav v Dabingu') . '?=';
-        $headers = $this->messageHeaders($boundary, $config['from']);
-        return $this->sendComposed($recipient, $subject, $body, $headers, $config);
+        return $this->sendComposed(
+            $recipient,
+            $subject,
+            $body,
+            $boundary,
+            $baseUrl,
+            $adminEmail,
+            $config,
+        );
     }
 
     /** Deliver a composed message through the configured platform transport.
      * @param string $recipient Validated recipient address.
      * @param string $subject Encoded subject.
      * @param string $body Complete multipart body.
-     * @param string $headers Safe sender and MIME headers.
+     * @param string $boundary Random multipart message boundary.
+     * @param string $publicBase Validated browser-visible public base URL.
+     * @param string $adminEmail Email from the refreshed authenticated account.
      * @param array{from:?string,smtp_host:?string,smtp_port:?int} $config Validated mail settings.
      * @return bool True when transport accepts the message.
      */
@@ -145,11 +165,19 @@ final class InviteMailer
         string $recipient,
         string $subject,
         string $body,
-        string $headers,
+        string $boundary,
+        string $publicBase,
+        string $adminEmail,
         array $config
     ): bool {
+        $sender = $this->senderSelection(
+            $adminEmail, $publicBase, $config['from']
+        );
+        $headers = $this->messageHeaders(
+            $boundary, $sender['from'], $sender['reply_to']
+        );
         $send = fn (): bool => $this->sendTransport(
-            $recipient, $subject, $body, $headers, $config['from']
+            $recipient, $subject, $body, $headers, $sender['from']
         );
         if (PHP_OS_FAMILY !== 'Windows') {
             return $send();
@@ -161,8 +189,8 @@ final class InviteMailer
             );
         }
         $settings = [];
-        if ($config['from'] !== null) {
-            $settings['sendmail_from'] = $config['from'];
+        if ($sender['from'] !== null) {
+            $settings['sendmail_from'] = $sender['from'];
         }
         if ($config['smtp_host'] !== null && $config['smtp_port'] !== null) {
             $settings['SMTP'] = $config['smtp_host'];
@@ -252,14 +280,103 @@ final class InviteMailer
         }
     }
 
-    /** Build common MIME headers and include From only when explicitly configured.
+    /** Choose a safe sender based on configured mail and the public host.
+     * @param string $adminEmail Email from the refreshed account, possibly legacy-invalid.
+     * @param string $publicBase Validated browser-visible public base URL.
+     * @param string|null $configuredFrom Validated explicit mail sender or null.
+     * @return array{from:?string,reply_to:?string} Safe header and envelope sender choices.
+     */
+    private function senderSelection(
+        string $adminEmail,
+        string $publicBase,
+        ?string $configuredFrom
+    ): array {
+        $safeAdminEmail = $this->isSafeMailbox($adminEmail) ? $adminEmail : null;
+        // Legacy accounts may predate mailbox validation, so keep the server fallback usable.
+        if ($configuredFrom !== null) {
+            $replyTo = $safeAdminEmail !== null
+                && strcasecmp($configuredFrom, $safeAdminEmail) !== 0
+                ? $safeAdminEmail : null;
+            return [
+                'from' => $configuredFrom,
+                'reply_to' => $replyTo,
+            ];
+        }
+        if ($safeAdminEmail === null) {
+            return ['from' => null, 'reply_to' => null];
+        }
+        $host = $this->publicDnsHost($publicBase);
+        $domain = strtolower(substr(strrchr($safeAdminEmail, '@') ?: '', 1));
+        if ($host !== null
+            && ($domain === $host || str_ends_with($host, '.' . $domain))
+            && $this->isSafeEnvelopeMailbox($safeAdminEmail)) {
+            return [
+                'from' => $safeAdminEmail,
+                'reply_to' => null,
+            ];
+        }
+        return ['from' => null, 'reply_to' => $safeAdminEmail];
+    }
+
+    /** Check one mailbox for safe use in mail headers and POSIX arguments.
+     * @param string $email Candidate account email.
+     * @return bool True for a valid ASCII mailbox without header controls.
+     */
+    private function isSafeMailbox(string $email): bool
+    {
+        $mailboxPattern = '/\A[^\x00-\x1f\x7f]+\z/D';
+        return strlen($email) <= 254
+            && filter_var($email, FILTER_VALIDATE_EMAIL) !== false
+            && preg_match('/[\x00-\x20\x7f]/', $email) !== 1
+            && preg_match($mailboxPattern, $email) === 1;
+    }
+
+    /** Check whether a mailbox is safe for PHP's POSIX envelope argument.
+     * @param string $email Already validated mailbox candidate.
+     * @return bool True when it uses only plain ASCII envelope characters.
+     */
+    private function isSafeEnvelopeMailbox(string $email): bool
+    {
+        return preg_match(
+                '/\A[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+\z/D',
+                $email
+            ) === 1;
+    }
+
+    /** Return a DNS hostname from the validated base, excluding ports and IPs.
+     * @param string $publicBase Validated browser-visible public base URL.
+     * @return string|null Lowercase DNS hostname, or null for IP/non-DNS hosts.
+     */
+    private function publicDnsHost(string $publicBase): ?string
+    {
+        $host = parse_url($publicBase, PHP_URL_HOST);
+        if (!is_string($host)) {
+            return null;
+        }
+        $host = strtolower(rtrim(trim($host, '[]'), '.'));
+        if (filter_var($host, FILTER_VALIDATE_IP) !== false
+            || filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
+            return null;
+        }
+        return $host;
+    }
+
+    /** Build common MIME headers and include only validated optional addresses.
      * @param string $boundary Random multipart message boundary.
-     * @param string|null $sender Validated configured sender or null for PHP defaults.
+     * @param string|null $sender Validated From address or null for PHP defaults.
+     * @param string|null $replyTo Validated administrator address or null to omit.
      * @return string Safe MIME headers.
      */
-    private function messageHeaders(string $boundary, ?string $sender): string
+    private function messageHeaders(
+        string $boundary,
+        ?string $sender,
+        ?string $replyTo
+    ): string
     {
         $headers = $sender === null ? '' : 'From: ' . $sender . "\r\n";
+        if ($replyTo !== null) {
+            $headers .= 'Reply-To: ' . $replyTo . "\r\n";
+        }
         return $headers . "MIME-Version: 1.0\r\n"
             . 'Content-Type: multipart/alternative; boundary="' . $boundary . '"';
     }
@@ -269,7 +386,7 @@ final class InviteMailer
      * @param string $subject Encoded message subject.
      * @param string $body Multipart message body.
      * @param string $headers MIME and sender headers.
-     * @param string|null $sender Validated override sender, or null to use PHP defaults.
+     * @param string|null $sender Validated POSIX envelope sender, or null for PHP defaults.
      * @return bool True when PHP mail accepts the message.
      */
     private function sendTransport(
@@ -296,7 +413,13 @@ final class InviteMailer
             if ($sender === null) {
                 return mail($recipient, $subject, $body, $headers);
             }
-            return mail($recipient, $subject, $body, $headers, '-f ' . $sender);
+            return mail(
+                $recipient,
+                $subject,
+                $body,
+                $headers,
+                '-f ' . $sender
+            );
         } finally {
             restore_error_handler();
         }
@@ -378,7 +501,7 @@ final class InviteMailer
         $from = isset($config['from']) && is_string($config['from'])
             ? trim($config['from']) : '';
         if (filter_var($from, FILTER_VALIDATE_EMAIL) === false
-            || preg_match('/\A[A-Za-z0-9.!#$%&\'*+\/= ?^_`{|}~-]+@[A-Za-z0-9.-]+\z/D', str_replace(' ', '', $from)) !== 1) {
+            || preg_match('/\A[A-Za-z0-9.!#$%&\'*+\/=?^_`{|}~-]+@[A-Za-z0-9.-]+\z/D', str_replace(' ', '', $from)) !== 1) {
             throw new FormError('Nastavte bezpečnou odesílací e-mailovou adresu.');
         }
         $smtpHost = $config['smtp_host'] ?? null;
