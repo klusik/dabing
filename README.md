@@ -72,9 +72,15 @@ EQ zvýrazní zvolené pásmo a zobrazí jeho střed i přibližné hranice. U f
 od 1 kHz editor používá kHz, pod touto hranicí Hz; uložená frekvence zůstává
 v Hz. Tlačítko tužky u existujícího profilu vybere jeho název k přejmenování.
 
-Zvukové profily jsou globální a spravuje je administrátor. Nastavení se
-zobrazí pouze uživateli s přístupem do příslušného projektu. Hlasové a
-hlasová, řádková i jednotlivá přiřazení se nastavují v projektovém studiu.
+Zvukové profily jsou globální pojmenované definice, které spravuje
+administrátor a lze je znovu použít v různých knihách. Přiřazení jsou vždy
+samostatná pro jednu knihu: pravidlo přesné postavy a autora nahrávky tvoří
+výchozí hodnotu, replika ji přepíše a jednotlivý pokus má nejvyšší prioritu.
+Chybějící přiřazení dědí; „Bez efektů“ je výslovná volba, která dědění zastaví.
+Uložené pravidlo postavy a dabéra se po obnovení načte znovu. Jednotlivé
+přiřazení platí i pro budoucí pokusy dané repliky. Nastavení projektu uvidí
+pouze uživatelé s přístupem do něj.
+
 Stahování jednoho pokusu zachová originální název a bajty; upravená kopie má
 příponu `_effects.mp3`. Párový ZIP obsahuje originál i upravenou kopii.
 Export celé knihy nabízí původní ZIP a samostatný balíček s kopiemi pro
@@ -82,7 +88,6 @@ nahrávky, které mají aktivní profil. V prohlížeči se společně zpracová
 nejvýše 256 MiB. Zdroj může mít nejvýše 20 MiB a 181 sekund, výstup nejvýše
 184 sekund. Zpracování probíhá v prohlížeči; hosting WEDOS nepotřebuje
 zvukový backend ani FFmpeg.
-
 ### Aktualizace z verze 0.2.2
 
 Před aktualizací zálohujte databázi a úložiště. Nainstalujte vydání 0.3.0
@@ -94,13 +99,13 @@ nemůže měnit schéma, zadejte účet s oprávněním DDL do pole
 
 ### Aktualizace z verze 0.3.0 nebo 0.4.0
 
-Před aktualizací zálohujte databázi a úložiště. Nainstalujte vydání 0.4.1
+Před aktualizací zálohujte databázi a úložiště. Nainstalujte vydání 0.4.2
 přes **Aktualizace**. Při přechodu z 0.3.0 updater aplikuje migraci
 `0003_audio_profiles.php` pro tabulky profilů a projektových přiřazení;
-instalace 0.4.0 už tuto migraci obsahuje. Vydání 0.4.1 zachovává ploché cesty
+instalace 0.4.0 už tuto migraci obsahuje. Vydání 0.4.2 zachovává ploché cesty
 assetů, které podporuje updater 0.3.0. Pokud přechod na 0.4.0 skončil chybou
 o souboru mimo povolený seznam a aplikace se vrátila na 0.3.0, opakujte
-aktualizaci přímo balíčkem 0.4.1.
+aktualizaci přímo balíčkem 0.4.2.
 
 ## Scénář
 

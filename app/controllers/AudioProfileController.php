@@ -204,28 +204,19 @@ final class AudioProfileController
         }
         $profiles = $this->model->profiles($projectId);
         $profileIds = array_fill_keys(array_column($profiles, 'id'), true);
-        $overrides = [];
-        $voiceRules = [];
-        foreach ($this->model->assignments($projectId) as $assignment) {
-            if ($assignment['scope'] === 'voice'
-                && $assignment['character_name'] !== null
-                && $assignment['user_id'] !== null) {
-                $voiceRules[$assignment['character_name']][(string) $assignment['user_id']]
-                    = $assignment['profile_id'] ?? 0;
-            } else {
-                $overrides[$assignment['scope']][$assignment['target_id']]
-                    = $assignment['profile_id'] ?? 0;
-            }
-        }
+        $service = new AudioProfileService($this->model);
+        $assignments = $service->indexAssignments(
+            $this->model->assignments($projectId)
+        );
         $takes = [];
         foreach ($book['takes'] as $take) {
-            $lineChoice = $overrides['line'][$take['line_id']] ?? null;
-            $voiceChoice = $take['user_id'] === null ? null
-                : ($voiceRules[$take['character']][(string) $take['user_id']] ?? null);
-            $effective = array_key_exists($take['id'], $overrides['take'] ?? [])
-                ? $overrides['take'][$take['id']] : ($lineChoice ?? $voiceChoice);
-            $profileId = is_int($effective) && $effective > 0
-                && isset($profileIds[$effective]) ? $effective : null;
+            $resolved = $service->resolveAssignment(
+                $assignments, $take['line_id'], $take['id'],
+                $take['character'], $take['user_id']
+            );
+            $profileId = $resolved['profile_id'] !== null
+                && isset($profileIds[$resolved['profile_id']])
+                ? $resolved['profile_id'] : null;
             $takes[] = [
                 'id' => $take['id'],
                 'file_name' => TakeNaming::fileName(
