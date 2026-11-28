@@ -475,6 +475,7 @@ input:focus, textarea:focus { border-color: var(--forest); outline: 3px solid rg
 
 @media (max-width: 680px) {
     .site-header { min-height: 66px; }
+    .top-nav { gap: 4px; flex-wrap: wrap; }
     .top-nav .icon-control { width: 44px; min-width: 44px; height: 44px; flex-basis: 44px; }
     .site-main:has(.workspace-heading) { padding-top: 14px; }
     .workspace-heading { align-items: center; flex-direction: row; flex-wrap: wrap; margin-bottom: 8px; }
