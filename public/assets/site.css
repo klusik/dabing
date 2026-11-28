@@ -600,7 +600,7 @@ input:focus, textarea:focus { border-color: var(--forest); outline: 3px solid rg
     .take-row audio { grid-column: 1 / -1; grid-row: 2; }
     .take-row form { grid-column: 3; grid-row: 1; }
     .take-row .take-hide-form { grid-column: 4; grid-row: 1; }
-    .take-download { grid-column: 6; grid-row: 1 / -1; }
+    .take-download { grid-column: 6; grid-row: 1; align-self: center; }
     .take-hide-trigger { width: 44px; min-width: 44px; height: 44px; flex-basis: 44px; font-size: 14px; }
 }
 

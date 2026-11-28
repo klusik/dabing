@@ -167,6 +167,7 @@ function closePanel(panel, trigger) {
     panel.style.left = '';
     panel.style.top = '';
     panel.style.maxHeight = '';
+    panel.style.maxWidth = '';
     trigger?.setAttribute('aria-expanded', 'false');
 }
 
@@ -181,12 +182,14 @@ function positionPanel(trigger, panel) {
         '.cast-popover, .invite-popover, .users-popover, .character-filter-popover'
     )) return;
     const edge = 12;
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+    panel.style.maxWidth = `${Math.max(0, viewportWidth - edge * 2)}px`;
     panel.style.maxHeight = `${Math.max(120, window.innerHeight - edge * 2)}px`;
     const anchor = trigger.getBoundingClientRect();
     const bounds = panel.getBoundingClientRect();
     const left = Math.max(
         edge,
-        Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - edge)
+        Math.min(anchor.right - bounds.width, viewportWidth - bounds.width - edge)
     );
     const below = anchor.bottom + 8;
     const top = below + bounds.height <= window.innerHeight - edge
