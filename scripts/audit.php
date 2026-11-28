@@ -135,6 +135,7 @@ function auditMailTransport(): void
     $captureCommand = $directory . DIRECTORY_SEPARATOR . 'capture.sh';
     $configuredStorage = $directory . DIRECTORY_SEPARATOR . 'configured';
     $stage = 'prepare isolated capture';
+    $safeDetail = null;
     try {
         if (!mkdir($configuredStorage, 0700)) {
             throw new RuntimeException('Configured mail fixture directory failed.');
@@ -197,6 +198,7 @@ function auditMailTransport(): void
         $stage = 'run PHP mail fixtures';
         $result = runCommand([
             PHP_BINARY,
+            '-n',
             '-d',
             'sendmail_path=' . $sendmailPath,
             '-r',
@@ -240,6 +242,41 @@ function auditMailTransport(): void
             }
             return trim((string) $headerMatch[1]);
         };
+        $displayMailbox = static function (?string $mailbox) use (
+            $sender,
+            $externalAdmin,
+            $configuredFrom
+        ): string {
+            if ($mailbox === null) {
+                return '<absent>';
+            }
+            return in_array(
+                $mailbox,
+                [$sender, $externalAdmin, $configuredFrom],
+                true
+            ) ? $mailbox : '<other>';
+        };
+        $displayArguments = static function (array $arguments) use (
+            $sender,
+            $externalAdmin,
+            $configuredFrom
+        ): string {
+            $safeArguments = array_map(
+                static function (string $argument) use (
+                    $sender,
+                    $externalAdmin,
+                    $configuredFrom
+                ): string {
+                    return in_array(
+                        $argument,
+                        ['-t', '-i', '-f', $sender, $externalAdmin, $configuredFrom],
+                        true
+                    ) ? $argument : '<other>';
+                },
+                $arguments
+            );
+            return '[' . implode(' ', $safeArguments) . ']';
+        };
         $expectedFrom = [
             $sender,
             $sender,
@@ -268,11 +305,28 @@ function auditMailTransport(): void
             $expectedArguments = $expectedEnvelope[$index] === null
                 ? ['-t', '-i']
                 : ['-t', '-i', '-f', $expectedEnvelope[$index]];
-            if ($from !== $expectedFrom[$index]
-                || $replyTo !== $expectedReplyTo[$index]
-                || $argumentsByMessage[$index] !== $expectedArguments) {
+            if ($from !== $expectedFrom[$index]) {
+                $safeDetail = 'From mismatch: expected '
+                    . $displayMailbox($expectedFrom[$index]) . ', got '
+                    . $displayMailbox($from) . '.';
                 throw new RuntimeException(
-                    'Mail sender, reply, or envelope precedence was incorrect.'
+                    'Mail From assertion failed.'
+                );
+            }
+            if ($replyTo !== $expectedReplyTo[$index]) {
+                $safeDetail = 'Reply-To mismatch: expected '
+                    . $displayMailbox($expectedReplyTo[$index]) . ', got '
+                    . $displayMailbox($replyTo) . '.';
+                throw new RuntimeException(
+                    'Mail Reply-To assertion failed.'
+                );
+            }
+            if ($argumentsByMessage[$index] !== $expectedArguments) {
+                $safeDetail = 'sendmail argv mismatch: expected '
+                    . $displayArguments($expectedArguments) . ', got '
+                    . $displayArguments($argumentsByMessage[$index]) . '.';
+                throw new RuntimeException(
+                    'Mail envelope assertion failed.'
                 );
             }
             if (!str_contains($message, 'multipart/alternative')
@@ -308,7 +362,8 @@ function auditMailTransport(): void
     } catch (Throwable $error) {
         throw new RuntimeException(
             'Native mail audit failed during ' . $stage . ' ('
-            . get_class($error) . ').',
+            . get_class($error) . ').'
+            . ($safeDetail === null ? '' : ' ' . $safeDetail),
             0,
             $error
         );
