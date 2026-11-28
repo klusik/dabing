@@ -44,6 +44,7 @@ $chainJson = json_encode($chain, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | J
             </select>
         </label>
         <button class="profile-button" type="button" data-new-profile>＋ Nový</button>
+        <button class="profile-button profile-rename" type="button" data-rename-profile aria-label="Přejmenovat profil" title="Přejmenovat profil"<?= $profile === null ? ' hidden disabled' : '' ?>>✎</button>
         <span class="profile-toolbar-spacer"></span>
         <label class="file-button" title="Načíst místní zvukový soubor">↥ Soubor
             <input type="file" accept="audio/*" data-local-audio aria-label="Načíst zvukový soubor">
@@ -59,6 +60,7 @@ $chainJson = json_encode($chain, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | J
         <section class="mixer-channel detail-channel" aria-label="Nastavení vybraného efektu">
             <div class="detail-heading">
                 <h2 data-effect-title>Efekt</h2>
+                <span class="eq-band-summary" id="eq-band-summary" data-eq-band-summary hidden></span>
                 <span class="preview-caption" data-preview-caption>Načtěte zvuk a spusťte poslech.</span>
             </div>
             <canvas class="effect-preview-graph" data-effect-preview aria-label="Vstupní a výstupní průběh vybraného efektu"></canvas>

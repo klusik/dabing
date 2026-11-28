@@ -40,6 +40,12 @@ const MAX_DBFS = 0;
  */
 const RESPONSE_CONTEXT_LENGTH = 1;
 
+/** Type: number; Units: hertz; Scope: EQ focus bands; Consumers: describeEqBand();
+ * Rationale: match the editor's supported 20 Hz–20 kHz audible range.
+ */
+const EQ_MIN_HZ = 20;
+const EQ_MAX_HZ = 20000;
+
 const PALETTE = Object.freeze({
     background: '#253128',
     grid: '#536154',
@@ -71,9 +77,58 @@ export function formatPreviewNumber(value) {
     return PREVIEW_NUMBER_FORMATTER.format(normalized);
 }
 
+/** Describe the approximate frequency region represented by an EQ band.
+ * @param {{bands:Array<{frequency:number,gain:number,q:number,cutoff:boolean}>}|null|undefined} settings EQ settings.
+ * @param {number} bandIndex Zero-based EQ band position.
+ * @returns {{centerHz:number,lowHz:number,highHz:number,label:string}|null} Band description or null for invalid input.
+ */
+export function describeEqBand(settings, bandIndex) {
+    if (!Array.isArray(settings?.bands) || !Number.isInteger(bandIndex)
+        || bandIndex < 0 || bandIndex >= settings.bands.length) {
+        return null;
+    }
+    const band = settings.bands[bandIndex];
+    if (!band || !Number.isFinite(band.frequency)
+        || band.frequency < EQ_MIN_HZ || band.frequency > EQ_MAX_HZ
+        || !Number.isFinite(band.q) || band.q <= 0) {
+        return null;
+    }
+
+    const centerHz = band.frequency;
+    let lowHz;
+    let highHz;
+    let extentLabel;
+    if (bandIndex === 0 && band.cutoff === true) {
+        lowHz = EQ_MIN_HZ;
+        highHz = centerHz;
+        extentLabel = `pod ${formatFrequency(centerHz)}`;
+    } else if (bandIndex === settings.bands.length - 1
+        && band.cutoff === true) {
+        lowHz = centerHz;
+        highHz = EQ_MAX_HZ;
+        extentLabel = `nad ${formatFrequency(centerHz)}`;
+    } else {
+        const halfInverseQ = 1 / (2 * band.q);
+        const halfGainRatio = Math.hypot(1, halfInverseQ) + halfInverseQ;
+        lowHz = Math.max(EQ_MIN_HZ, centerHz / halfGainRatio);
+        highHz = Math.min(EQ_MAX_HZ, centerHz * halfGainRatio);
+        extentLabel = `≈ ${formatFrequency(lowHz)}–${formatFrequency(highHz)}`;
+    }
+
+    const bandLabel = bandIndex === 0 ? 'LOW'
+        : (bandIndex === settings.bands.length - 1
+            ? 'HIGH' : `B${bandIndex + 1}`);
+    return {
+        centerHz,
+        lowHz,
+        highHz,
+        label: `${bandLabel} · ${formatFrequency(centerHz)} · ${extentLabel}`,
+    };
+}
+
 /** Draw measured traces for one selected effect in a responsive canvas.
  * @param {HTMLCanvasElement} canvas Target chart canvas.
- * @param {{effect:{type:string,enabled:boolean,settings:Object},stage:null|{enabled:boolean,input:{level:{values:Float32Array,stepSeconds:number,duration:number,peakDb:number},spectrum:null|{frames:Float32Array,frequencies:Float32Array,frameCount:number,stepSeconds:number,duration:number}},output:{level:{values:Float32Array,stepSeconds:number,duration:number,peakDb:number},spectrum:null|{frames:Float32Array,frequencies:Float32Array,frameCount:number,stepSeconds:number,duration:number}}},time:number,original:boolean}} options Current effect, its measured stage, playhead time and source mode.
+ * @param {{effect:{type:string,enabled:boolean,settings:Object},stage:null|{enabled:boolean,input:{level:{values:Float32Array,stepSeconds:number,duration:number,peakDb:number},spectrum:null|{frames:Float32Array,frequencies:Float32Array,frameCount:number,stepSeconds:number,duration:number}},output:{level:{values:Float32Array,stepSeconds:number,duration:number,peakDb:number},spectrum:null|{frames:Float32Array,frequencies:Float32Array,frameCount:number,stepSeconds:number,duration:number}}},time:number,original:boolean,eqBand?:{centerHz:number,lowHz:number,highHz:number,label:string}|null}} options Current effect, measured stage, playhead, source mode and optional selected EQ band.
  * @returns {void} Paints the chart; missing traces show a labeled empty grid.
  */
 export function drawEffectPreview(canvas, options) {
@@ -101,7 +156,8 @@ export function drawEffectPreview(canvas, options) {
             bottom: levelPlot.bottom + splitY,
         };
         drawSpectrumPlot(
-            ctx, spectrumRect, effect, stage, time, original
+            ctx, spectrumRect, effect, stage, time, original,
+            options.eqBand ?? null
         );
         drawLevelPlot(ctx, levelRect, effect, stage, time, original);
         return;
@@ -195,7 +251,7 @@ function drawLevelPlot(ctx, rect, effect, stage, time, original) {
         drawLevelTrace(ctx, rect, output, duration, PALETTE.output);
     }
 
-    const marker = original ? null : levelMarker(effect);
+    const marker = levelMarker(effect);
     if (marker !== null) {
         drawHorizontalMarker(ctx, rect, marker, markerLabel(effect));
     }
@@ -253,11 +309,13 @@ function drawLevelTrace(ctx, rect, trace, duration, color) {
  * @param {Object|null} stage Measured stage traces.
  * @param {number} time Current player time in seconds.
  * @param {boolean} original Whether to show only the original input.
+ * @param {{centerHz:number,lowHz:number,highHz:number,label:string}|null} eqBand Optional selected EQ band region.
  * @returns {void} Draws measured FFT traces and the configured native response.
  */
-function drawSpectrumPlot(ctx, rect, effect, stage, time, original) {
+function drawSpectrumPlot(ctx, rect, effect, stage, time, original, eqBand) {
     drawDbGrid(ctx, rect, true);
     drawFrequencyLabels(ctx, rect);
+    drawEqBandRegion(ctx, rect, eqBand);
     const input = stage?.input?.spectrum;
     const output = original ? null : stage?.output?.spectrum;
     if (input) {
@@ -266,19 +324,53 @@ function drawSpectrumPlot(ctx, rect, effect, stage, time, original) {
     if (output) {
         drawSpectrumTrace(ctx, rect, output, time, PALETTE.output);
     }
-    const response = original && stage
-        ? null : configuredEqResponse(effect.settings, rect.width);
+    const response = configuredEqResponse(effect.settings, rect.width);
     if (response) {
         drawEqResponse(ctx, rect, response);
     }
     if (input) {
         drawLegend(ctx, rect, original
-            ? ['Originál'] : ['Vstup', 'Výstup', 'Nastavení']);
-    } else if (response) {
-        drawEmptyInPlot(ctx, rect, 'Spusťte poslech ukázky');
+            ? ['Originál', 'Nastavení'] : ['Vstup', 'Výstup', 'Nastavení']);
     } else {
         drawEmptyInPlot(ctx, rect, 'Spusťte poslech ukázky');
     }
+}
+
+/** Draw a selected EQ band's approximate frequency region and center.
+ * @param {CanvasRenderingContext2D} ctx Scaled canvas context.
+ * @param {{left:number,right:number,top:number,bottom:number,width:number,height:number}} rect Plot bounds.
+ * @param {{centerHz:number,lowHz:number,highHz:number,label:string}|null} band Selected band description.
+ * @returns {void} Shades the band and marks its center beneath measured traces.
+ */
+function drawEqBandRegion(ctx, rect, band) {
+    if (!band || !Number.isFinite(band.lowHz)
+        || !Number.isFinite(band.highHz)
+        || !Number.isFinite(band.centerHz)) {
+        return;
+    }
+    const lowX = frequencyX(rect, band.lowHz);
+    const highX = frequencyX(rect, band.highHz);
+    const centerX = frequencyX(rect, band.centerHz);
+    ctx.fillStyle = 'rgba(131, 202, 221, 0.10)';
+    ctx.fillRect(lowX, rect.top, Math.max(1, highX - lowX), rect.height);
+
+    ctx.beginPath();
+    ctx.moveTo(lowX, rect.top);
+    ctx.lineTo(lowX, rect.bottom);
+    ctx.moveTo(highX, rect.top);
+    ctx.lineTo(highX, rect.bottom);
+    ctx.strokeStyle = 'rgba(131, 202, 221, 0.58)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 3]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.beginPath();
+    ctx.moveTo(centerX, rect.top);
+    ctx.lineTo(centerX, rect.bottom);
+    ctx.strokeStyle = PALETTE.output;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
 }
 
 /** Draw one frame-major FFT spectrum against its frequency bins.
@@ -556,22 +648,24 @@ function markerLabel(effect) {
  * @returns {void} Draws labels that fit the graph width.
  */
 function drawLegend(ctx, rect, labels) {
-    const colors = labels.length === 1
-        ? [PALETTE.input]
-        : labels.length === 2
-            ? [PALETTE.input, PALETTE.output]
-            : [PALETTE.input, PALETTE.output, PALETTE.configured];
+    const colors = labels.map((label) => {
+        if (label === 'Originál' || label === 'Vstup') {
+            return PALETTE.input;
+        }
+        return label === 'Výstup' ? PALETTE.output : PALETTE.configured;
+    });
     ctx.font = '9px system-ui, sans-serif';
     ctx.textBaseline = 'alphabetic';
     let x = rect.left;
     const y = Math.max(9, rect.top - 3);
     for (let index = 0; index < labels.length; index += 1) {
-        const color = colors[index];
+        const isConfiguration = labels[index] === 'Nastavení';
+        const color = isConfiguration ? PALETTE.configured : colors[index];
         ctx.beginPath();
         ctx.moveTo(x, y - 3);
         ctx.lineTo(x + 10, y - 3);
         ctx.strokeStyle = color;
-        ctx.setLineDash(index === 2 ? [3, 2] : []);
+        ctx.setLineDash(isConfiguration ? [3, 2] : []);
         ctx.stroke();
         ctx.setLineDash([]);
         x += 13;
@@ -630,6 +724,17 @@ function dbY(rect, value) {
 function frequencyX(rect, hz) {
     const bounded = clamp(hz, 20, 20000);
     return rect.left + rect.width * Math.log(bounded / 20) / Math.log(1000);
+}
+
+/** Format a frequency compactly in hertz or kilohertz.
+ * @param {number} hz Frequency in hertz.
+ * @returns {string} Czech number with a concise frequency unit.
+ */
+function formatFrequency(hz) {
+    if (hz >= 1000) {
+        return `${formatPreviewNumber(hz / 1000)} kHz`;
+    }
+    return `${formatPreviewNumber(hz)} Hz`;
 }
 
 /** Return a positive finite time step or a harmless structural fallback.

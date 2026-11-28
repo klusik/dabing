@@ -62,13 +62,14 @@ async function loadEditorModules() {
  */
 function initialize(modules) {
     const {renderProfilePreview} = modules.analysis;
-    const {drawEffectPreview, formatPreviewNumber} = modules.charts;
+    const {drawEffectPreview, describeEqBand, formatPreviewNumber} = modules.charts;
     const {renderAudioEffects} = modules.engine;
     const state = {
         chain: readChain(root.dataset.chain), blob: null, sourceUrl: '', renderUrl: '',
         audioContext: null, mediaSource: null, analyser: null, peaks: null,
-        smoothing: 8, selectedEffect: 0, previewMode: 'none', stages: null,
-        stale: false, renderToken: 0,
+        smoothing: 8, selectedEffect: 0, selectedEqBand: 1,
+        previewMode: 'none', stages: null, stale: false, renderToken: 0,
+        processing: false, processedActive: false, stoppedByAction: false,
     };
     const list = root.querySelector('[data-effect-list]');
     const panel = root.querySelector('[data-effect-editor]');
@@ -124,13 +125,80 @@ function initialize(modules) {
         const effect = state.chain[state.selectedEffect];
         if (!effect) return;
         const original = state.previewMode === 'original';
-        const stage = state.stale ? null : state.stages?.get(effect.type) || null;
-        drawEffectPreview(graph, {effect, stage, time: player.currentTime || 0, original});
+        const stage = state.stages?.get(effect.type) || null;
+        const eqBand = effect.type === 'eq'
+            ? describeEqBand(effect.settings, state.selectedEqBand)
+            : null;
+        const bandSummary = root.querySelector('[data-eq-band-summary]');
+        bandSummary.hidden = !eqBand;
+        bandSummary.textContent = eqBand?.label || '';
+        if (eqBand) graph.setAttribute('aria-describedby', 'eq-band-summary');
+        else graph.removeAttribute('aria-describedby');
+        drawEffectPreview(graph, {
+            effect,
+            stage,
+            time: player.currentTime || 0,
+            original,
+            eqBand,
+        });
         root.querySelector('[data-preview-caption]').textContent = state.stale
-            ? 'Nastavení se změnilo · spusťte poslech znovu pro aktuální křivku.'
-            : original ? 'Křivka originálu'
-                : stage ? 'Vstup a výstup aktuálního poslechu'
-                    : 'Načtěte zvuk a spusťte poslech efektů.';
+            ? 'Poslední poslech · změny čekají na nové spuštění.'
+            : state.processing && stage ? 'Poslední poslech · připravuji nový.'
+                : original ? 'Křivka originálu'
+                    : stage ? 'Naměřeno při posledním poslechu'
+                        : 'Načtěte zvuk a spusťte poslech efektů.';
+    }
+
+    /** Select one EQ band for graph highlighting and its accessible label.
+     * @param {number} index - Selected zero-based EQ band index.
+     * @returns {void} Updates selected-band styling and chart annotation.
+     */
+    function selectEqBand(index) {
+        if (!Number.isInteger(index) || index < 0 || index >= 6) return;
+        state.selectedEqBand = index;
+        root.querySelectorAll('.eq-band').forEach((item, itemIndex) => {
+            item.classList.toggle('is-selected-band', itemIndex === index);
+        });
+        drawSelectedPreview();
+    }
+
+    /** Set the primary audition button to its current processed state.
+     * @param {boolean} active - Whether a render or processed audition is active.
+     * @returns {void} Updates button text and its accessible action name.
+     */
+    function setProcessedActive(active) {
+        state.processedActive = active;
+        const button = root.querySelector('[data-play]');
+        button.textContent = active ? '■ Zastavit' : '▶ Poslech efektů';
+        button.setAttribute(
+            'aria-label',
+            active ? 'Zastavit efektovaný poslech' : 'Spustit poslech efektů',
+        );
+    }
+
+    /** Stop an active processed render/playback and invalidate its async work.
+     * @returns {void} Freezes the current playhead and preserves measured traces.
+     */
+    function stopProcessed() {
+        if (!state.processedActive && !state.processing) return;
+        state.renderToken += 1;
+        state.processing = false;
+        setProcessedActive(false);
+        state.stoppedByAction = true;
+        player.pause();
+        status.textContent = 'Poslech zastaven.';
+        drawSelectedPreview();
+    }
+
+    /** Toggle the primary button between processing and immediate stop.
+     * @returns {void} Starts a fresh render or cancels active processed work.
+     */
+    function toggleProcessedPlayback() {
+        if (state.processedActive) {
+            stopProcessed();
+            return;
+        }
+        playProcessed();
     }
 
     /** Rebuild chain buttons with selection, bypass and ordering actions.
@@ -328,6 +396,9 @@ function initialize(modules) {
             const item = document.createElement('div');
             item.className = 'eq-band';
             item.innerHTML = `<span class="eq-band-name">${index === 0 ? 'LOW' : index === 5 ? 'HIGH' : `B${index + 1}`}</span><label class="eq-gain-label">Zisk<input class="eq-gain" type="range" min="-18" max="18" step="0.5" value="${band.gain}" aria-label="Zisk pásma ${index + 1}"><output class="eq-gain-value"></output></label><div class="eq-knob-control"><span>Frekvence</span><span class="eq-knob-row"><button type="button" class="eq-knob" data-knob="frequency" aria-label="Frekvence pásma ${index + 1}"></button></span></div><div class="eq-knob-control"><span>Šířka Q</span><span class="eq-knob-row"><button type="button" class="eq-knob" data-knob="q" aria-label="Šířka Q pásma ${index + 1}"></button></span></div>`;
+            item.classList.toggle('is-selected-band', state.selectedEqBand === index);
+            item.addEventListener('focusin', () => selectEqBand(index));
+            item.addEventListener('pointerdown', () => selectEqBand(index));
             const gain = item.querySelector('.eq-gain');
             const output = item.querySelector('.eq-gain-value');
             output.value = `${formatPreviewNumber(band.gain)} dB`;
@@ -352,11 +423,13 @@ function initialize(modules) {
         edges.querySelector('[data-edge="lowpass"]').checked = Boolean(settings.bands[5].cutoff);
         edges.querySelectorAll('[data-edge]').forEach((toggle) => toggle.addEventListener('change', () => {
             const bandIndex = toggle.dataset.edge === 'highpass' ? 0 : 5;
+            selectEqBand(bandIndex);
             settings.bands[bandIndex].cutoff = toggle.checked;
             markPreviewStale();
             drawSelectedPreview();
             syncForm();
         }));
+        parent.append(edges);
     }
 
     /** Bind an EQ rotary button to pointer, keyboard and numeric entry.
@@ -497,7 +570,12 @@ function initialize(modules) {
         const token = ++state.renderToken;
         const chainSnapshot = structuredClone(state.chain);
         const chainJson = JSON.stringify(chainSnapshot);
+        state.processing = true;
+        state.stoppedByAction = false;
+        setProcessedActive(true);
+        player.pause();
         status.textContent = 'Zpracovávám ukázku…';
+        drawSelectedPreview();
         try {
             const result = await renderProfilePreview(
                 state.blob,
@@ -511,11 +589,20 @@ function initialize(modules) {
             state.renderUrl = URL.createObjectURL(wav(result.audio));
             state.previewMode = 'processed';
             player.src = state.renderUrl;
+            player.currentTime = 0;
             drawSelectedPreview();
-            await playAndAnalyze();
-            if (token === state.renderToken) status.textContent = 'Přehrává se efektovaný zvuk.';
+            const started = await playAndAnalyze(token);
+            if (!started || token !== state.renderToken) return;
+            state.processing = false;
+            drawSelectedPreview();
+            status.textContent = 'Přehrává se efektovaný zvuk.';
         } catch (error) {
-            if (token === state.renderToken) status.textContent = error.message;
+            if (token === state.renderToken) {
+                state.processing = false;
+                setProcessedActive(false);
+                status.textContent = error.message;
+                drawSelectedPreview();
+            }
         }
     }
 
@@ -526,7 +613,12 @@ function initialize(modules) {
         if (!state.sourceUrl || !state.blob) return;
         const token = ++state.renderToken;
         const chainSnapshot = structuredClone(state.chain);
+        state.processing = true;
+        state.stoppedByAction = false;
+        setProcessedActive(false);
+        player.pause();
         status.textContent = 'Připravuji originální průběhy…';
+        drawSelectedPreview();
         try {
             const bypassed = chainSnapshot.map((effect) => ({...effect, enabled: false}));
             const result = await renderProfilePreview(
@@ -539,18 +631,27 @@ function initialize(modules) {
             state.previewMode = 'original';
             state.stale = false;
             player.src = state.sourceUrl;
+            player.currentTime = 0;
             drawSelectedPreview();
-            await playAndAnalyze();
-            if (token === state.renderToken) status.textContent = 'Přehrává se originál.';
+            const started = await playAndAnalyze(token);
+            if (!started || token !== state.renderToken) return;
+            state.processing = false;
+            drawSelectedPreview();
+            status.textContent = 'Přehrává se originál.';
         } catch (error) {
-            if (token === state.renderToken) status.textContent = error.message;
+            if (token === state.renderToken) {
+                state.processing = false;
+                status.textContent = error.message;
+                drawSelectedPreview();
+            }
         }
     }
 
     /** Connect the analyser and play the selected player source.
-     * @returns {Promise<void>} Resolves after browser playback begins.
+     * @param {number} token - Current render transaction token.
+     * @returns {Promise<boolean>} Whether this transaction started playback.
      */
-    async function playAndAnalyze() {
+    async function playAndAnalyze(token) {
         if (state.spectrumFrame) cancelAnimationFrame(state.spectrumFrame);
         if (!state.audioContext) state.audioContext = new AudioContext();
         if (!state.mediaSource) state.mediaSource = state.audioContext.createMediaElementSource(player);
@@ -561,9 +662,14 @@ function initialize(modules) {
             state.analyser.connect(state.audioContext.destination);
         }
         await state.audioContext.resume();
+        if (token !== state.renderToken) return false;
+        const source = player.src;
         await player.play();
-        drawSpectrum();
+        if (token !== state.renderToken || player.src !== source) {
+            return false;
+        }
         drawSelectedPreview();
+        return true;
     }
 
     /** Encode an AudioBuffer as interleaved 16-bit PCM WAV.
@@ -656,6 +762,10 @@ function initialize(modules) {
      * @returns {void} Sets the audio player to the new source.
      */
     function useSource(url) {
+        state.processing = false;
+        state.stoppedByAction = true;
+        setProcessedActive(false);
+        player.pause();
         if (state.sourceUrl) URL.revokeObjectURL(state.sourceUrl);
         if (state.renderUrl) URL.revokeObjectURL(state.renderUrl);
         state.sourceUrl = url;
@@ -736,6 +846,11 @@ function initialize(modules) {
      */
     function bindPage() {
         root.querySelector('[data-new-profile]').addEventListener('click', newProfile);
+        root.querySelector('[data-rename-profile]').addEventListener('click', () => {
+            const name = root.querySelector('#profile-name');
+            name.focus();
+            name.select();
+        });
         root.querySelector('[data-profile-select]').addEventListener('change', (event) => {
             const url = new URL(location.href);
             if (event.currentTarget.value) url.searchParams.set('id', event.currentTarget.value);
@@ -743,18 +858,23 @@ function initialize(modules) {
             location.assign(url);
         });
         root.querySelector('[data-local-audio]').addEventListener('change', loadFile);
-        root.querySelector('[data-play]').addEventListener('click', playProcessed);
+        root.querySelector('[data-play]').addEventListener('click', toggleProcessedPlayback);
         root.querySelector('[data-play-original]').addEventListener('click', playOriginal);
         root.querySelector('[data-chain-input]').form.addEventListener('submit', syncForm);
         player.addEventListener('timeupdate', drawSelectedPreview);
         player.addEventListener('seeked', drawSelectedPreview);
         player.addEventListener('pause', () => {
             drawSelectedPreview();
-            if (!player.ended && state.previewMode !== 'none') {
+            if (player.paused && !player.ended && !state.processing && !state.stoppedByAction
+                && state.previewMode !== 'none') {
+                if (state.previewMode === 'processed') setProcessedActive(false);
                 status.textContent = 'Poslech pozastaven.';
             }
         });
         player.addEventListener('play', () => {
+            if (player.paused) return;
+            state.stoppedByAction = false;
+            if (state.previewMode === 'processed') setProcessedActive(true);
             drawSelectedPreview();
             if (state.previewMode !== 'none') {
                 status.textContent = state.previewMode === 'original'
@@ -762,7 +882,16 @@ function initialize(modules) {
                     : 'Přehrává se efektovaný zvuk.';
             }
         });
+        player.addEventListener('playing', () => {
+            if (player.paused) return;
+            if (state.spectrumFrame) cancelAnimationFrame(state.spectrumFrame);
+            drawSpectrum();
+        });
         player.addEventListener('ended', () => {
+            if (state.processing) return;
+            state.processing = false;
+            state.stoppedByAction = false;
+            setProcessedActive(false);
             status.textContent = 'Poslech ukončen.';
             drawSelectedPreview();
         });
@@ -778,6 +907,9 @@ function initialize(modules) {
         root.querySelector('[data-profile-id]').value = '';
         root.querySelector('#profile-name').value = '';
         root.querySelector('[data-profile-select]').value = '';
+        const renameButton = root.querySelector('[data-rename-profile]');
+        renameButton.hidden = true;
+        renameButton.disabled = true;
         markPreviewStale();
         state.chain = [];
         state.selectedEffect = 0;

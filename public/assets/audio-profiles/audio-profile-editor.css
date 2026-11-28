@@ -27,6 +27,8 @@
 .profile-toolbar-spacer { flex:1; }
 .profile-button,.file-button { min-height:36px; padding:6px 11px; border:1px solid var(--line); border-radius:7px; background:var(--surface-strong); color:var(--forest-deep); font-size:12px; font-weight:700; cursor:pointer; }
 .profile-button:hover,.file-button:hover { background:#e4ebd4; }
+.profile-rename { width:36px; min-width:36px; padding-inline:0; font-size:16px; }
+.profile-rename[hidden] { display:none; }
 .profile-button:disabled { cursor:not-allowed; opacity:.55; }
 .file-button { display:inline-flex; align-items:center; gap:6px; }
 .file-button input { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
@@ -44,7 +46,8 @@
 .effect-name { min-width:0; min-height:34px; overflow:hidden; padding:4px 7px; border:0; background:transparent; color:var(--mixer-text); font-size:12px; font-weight:700; text-align:left; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
 .effect-toggle[aria-pressed=true] { background:#d7ed8a; color:#233125; }
 .chain-hint { margin:9px 0 0; color:var(--mixer-muted); font-size:11px; }
-.detail-heading { display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:7px; }
+.detail-heading { display:flex; align-items:baseline; flex-wrap:wrap; justify-content:space-between; gap:6px 10px; margin-bottom:7px; }
+.eq-band-summary { color:#d7ed8a; font-size:10px; font-weight:700; white-space:nowrap; }
 .preview-caption { color:#c7d2c2; font-size:10px; text-align:right; }
 .effect-preview-graph { display:block; width:100%; height:210px; border:1px solid #465449; border-radius:6px; background:#253128; }
 .effect-preview-legend { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
@@ -52,10 +55,10 @@
 .effect-preview-legend span:nth-child(2)::before { border-color:#d7ed8a; }
 .effect-preview-legend span:nth-child(3)::before { border-color:#eee6d2; border-top-style:dashed; }
 .effect-editor { display:flex; align-items:flex-start; flex-wrap:wrap; gap:9px 14px; }
+.control-hint { flex-basis:100%; margin:0 0 1px; color:var(--mixer-muted); font-size:10px; }
 .effect-control { display:grid; justify-items:center; gap:5px; color:var(--mixer-muted); font-size:11px; }
 .control-label { font-weight:600; }
 .effect-control-row { display:flex; align-items:center; justify-content:center; gap:6px; }
-.control-hint { flex-basis:100%; margin:0 0 1px; color:var(--mixer-muted); font-size:10px; }
 .eq-knob { --angle:0deg; position:relative; display:grid; width:58px; height:58px; place-items:center; padding:7px; border:2px solid #748371; border-radius:50%; background:radial-gradient(circle at 35% 30%,#4a5a4c,#202922 72%); color:#f0f4e8; font:11px/1.1 ui-monospace,monospace; cursor:ns-resize; touch-action:none; }
 .eq-knob::before { position:absolute; top:5px; left:calc(50% - 1px); width:2px; height:8px; border-radius:2px; background:#d7ed8a; content:""; transform:rotate(var(--angle)); transform-origin:1px 24px; }
 .eq-knob:focus-visible,.effect-move:focus-visible,.effect-toggle:focus-visible,.effect-name:focus-visible { outline:2px solid #d7ed8a; outline-offset:2px; }
@@ -67,6 +70,7 @@
 .effect-fader output,.eq-gain-value { color:var(--mixer-text); font:11px ui-monospace,monospace; font-variant-numeric:tabular-nums; }
 .eq-bands { display:grid; width:100%; grid-template-columns:repeat(6,minmax(0,1fr)); gap:5px; }
 .eq-band { display:grid; min-width:0; justify-items:center; align-content:start; gap:5px; padding:6px 3px; border:1px solid #435047; border-radius:6px; background:#253128; color:var(--mixer-muted); font-size:10px; text-align:center; }
+.eq-band.is-selected-band { border-color:#d7ed8a; box-shadow:inset 0 0 0 1px #d7ed8a; color:#f0f4e8; }
 .eq-band label { display:grid; min-width:0; justify-items:center; gap:3px; }
 .eq-knob-control { display:grid; min-width:0; justify-items:center; gap:3px; }
 .eq-knob-row { display:flex; align-items:center; justify-content:center; gap:3px; }
@@ -77,8 +81,8 @@
 .eq-knob[data-knob] { width:42px; height:42px; padding:5px; font-size:9px; }
 .eq-knob[data-knob]::before { top:3px; transform-origin:1px 17px; }
 .eq-edges { display:flex; flex-wrap:wrap; gap:8px; width:100%; }
-.eq-edges label { display:flex; min-height:34px; align-items:center; gap:7px; padding:4px 9px; border:1px solid #465449; border-radius:6px; background:#253128; color:#d8e0d4; font-size:11px; }
-.eq-edges input { accent-color:#d7ed8a; }
+.eq-edges label { display:flex; min-height:34px; align-items:center; gap:7px; padding:4px 9px; border:1px solid #465449; border-radius:6px; background:#253128; color:#d8e0d4; font-size:11px; white-space:nowrap; }
+.eq-edges input[type=checkbox] { box-sizing:border-box; width:16px; min-width:16px; height:16px; min-height:16px; flex:0 0 16px; margin:0; padding:0; accent-color:#d7ed8a; }
 .monitor-strip { display:grid; grid-template-columns:minmax(250px,.65fr) minmax(0,1.5fr) minmax(220px,.8fr); gap:8px 12px; align-items:center; margin-top:9px; padding:9px; border:1px solid #36443a; border-radius:9px; background:#202922; }
 .monitor-controls { display:flex; flex-wrap:wrap; gap:5px; }
 .monitor-controls .profile-button { min-height:33px; padding-inline:8px; }
@@ -100,12 +104,13 @@
 @media(max-width:600px) {
     .profile-editor { width:100%; }
     .profile-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:6px; padding:7px; }
-    .profile-select-label { grid-column:1; min-width:0; }
-    .profile-select-label select { width:100%; min-width:0; flex:1; }
+    .profile-select-label { grid-column:1; min-width:0; font-size:0; }
+    .profile-select-label select { width:100%; min-width:0; flex:1; font-size:12px; }
     .profile-toolbar-spacer { display:none; }
-    .profile-toolbar [data-new-profile] { grid-column:2; }
-    .profile-toolbar .file-button { grid-column:3; }
-    .profile-file-name { grid-column:1/-1; min-width:0; max-width:100%; }
+    .profile-toolbar [data-new-profile] { grid-column:2; grid-row:1; }
+    .profile-toolbar [data-rename-profile] { grid-column:3; grid-row:1; }
+    .profile-toolbar .file-button { grid-column:1; grid-row:2; justify-self:start; }
+    .profile-file-name { grid-column:2/4; grid-row:2; min-width:0; max-width:100%; justify-self:stretch; }
     .mixer-grid { grid-template-columns:1fr; }
     .chain-hint { display:none; }
     .detail-channel { padding:9px 7px; }
