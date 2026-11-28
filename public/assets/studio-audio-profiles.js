@@ -174,13 +174,17 @@ function pauseForProcessing(audio) {
 
 /** Resolve the processed playback URL for a playlist button when needed.
  * @param {HTMLElement} item - Playlist button containing the recording metadata.
- * @returns {Promise<string>} Original or temporary processed media URL.
+ * @returns {Promise<string>} Original or processed URL; rejects on failure and stores the chain signature on the item.
  */
 async function playbackUrl(item) {
     const profileId = item.dataset.audioProfileId ?? '';
     const profile = readProfiles().get(profileId);
-    if (!profile || !hasAudioEffects(profile.chain)) return item.dataset.src ?? '';
+    if (!profile || !hasAudioEffects(profile.chain)) {
+        item.dataset.audioPlaybackSignature = profile ? JSON.stringify(profile.chain) : '';
+        return item.dataset.src ?? '';
+    }
     const signature = JSON.stringify(profile.chain);
+    item.dataset.audioPlaybackSignature = signature;
     const key = `${item.dataset.recordingId}:${profileId}:${signature}`;
     let cached = processedPlayback.get(key);
     if (cached?.url) return cached.url;
@@ -377,6 +381,7 @@ function bindStudioAudioProfiles() {
         } finally { link.removeAttribute('aria-busy'); }
     });
     window.dabingAudioPlaybackUrl = playbackUrl;
+    window.dispatchEvent(new Event('dabing:audio-profile-ready'));
     window.addEventListener('pagehide', () => {
         processedPlayback.forEach((entry) => {
             if (entry.url) URL.revokeObjectURL(entry.url);

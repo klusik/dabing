@@ -67,7 +67,9 @@ efektů úroveň v čase. Číselné hodnoty lze zadávat s čárkou i tečkou; 
 uplatní při dalším spuštění „Poslech efektů“. Zastavení je dostupné také během
 výpočtu; příští spuštění použije aktuální řetězec od začátku. Při úpravách
 zůstává vidět poslední úspěšně naměřená křivka; u zpracovaného poslechu
-popisek upozorní na změny.
+popisek upozorní na změny. Běžné Play v editoru připraví náhled podle aktuálních
+efektů. Tlačítko „Originál“ přehraje zdroj bez efektů. Běžný poslech knihy
+používá výsledný profil daného pokusu.
 EQ zvýrazní zvolené pásmo a zobrazí jeho střed i přibližné hranice. U frekvencí
 od 1 kHz editor používá kHz, pod touto hranicí Hz; uložená frekvence zůstává
 v Hz. Tlačítko tužky u existujícího profilu vybere jeho název k přejmenování.
