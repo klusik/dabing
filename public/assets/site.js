@@ -38,7 +38,7 @@ let savedPageNeedsRefresh = false;
 const boundPanelTriggers = new WeakSet();
 const boundRecorders = new WeakSet();
 const playlistStates = new WeakMap();
-/** @type {WeakMap<HTMLElement,{url:string,historyMode:'push'|'replace'|'none',force:boolean}>} */
+/** @type {WeakMap<HTMLElement,{url:string,historyMode:'push'|'replace'|'none',force:boolean,scrollMode?:'line'|'viewport'}>} */
 const queuedProjectRefreshes = new WeakMap();
 
 /**
@@ -1482,9 +1482,10 @@ function syncProjectShell(current, next) {
  * @param {string} requestedUrl - Canonical project URL to fetch.
  * @param {'push'|'replace'|'none'} historyMode - URL history behavior after success.
  * @param {boolean} force - Whether to fetch even when revision already matches.
+ * @param {'line'|'viewport'} [scrollMode='line'] - Restore the visible line or keep the latest page scroll.
  * @returns {Promise<boolean>} True when a valid project response was applied.
  */
-async function refreshProjectView(root, requestedUrl, historyMode, force) {
+async function refreshProjectView(root, requestedUrl, historyMode, force, scrollMode = 'line') {
     if (activeCaptureCard || hasActiveLinePlayback()) {
         root.dataset.refreshDeferred = 'true';
         if (historyMode !== 'none') {
@@ -1492,6 +1493,7 @@ async function refreshProjectView(root, requestedUrl, historyMode, force) {
                 url: requestedUrl,
                 historyMode,
                 force,
+                scrollMode,
             });
             root.dataset.pendingNavigationUrl = requestedUrl;
         }
@@ -1502,6 +1504,7 @@ async function refreshProjectView(root, requestedUrl, historyMode, force) {
             url: requestedUrl,
             historyMode,
             force,
+            scrollMode,
         });
         if (historyMode !== 'none') root.dataset.pendingNavigationUrl = requestedUrl;
         return false;
@@ -1511,8 +1514,10 @@ async function refreshProjectView(root, requestedUrl, historyMode, force) {
     if (historyMode !== 'none') root.dataset.pendingNavigationUrl = target.href;
     target.searchParams.delete('view');
     const projectContent = root.querySelector('[data-project-content]');
-    const visibleLine = Array.from(root.querySelectorAll('[data-line-card]'))
-        .find((line) => line.getBoundingClientRect().bottom > 0);
+    const visibleLine = scrollMode === 'line'
+        ? Array.from(root.querySelectorAll('[data-line-card]'))
+            .find((line) => line.getBoundingClientRect().bottom > 0)
+        : null;
     const anchorLineId = visibleLine?.dataset.lineId ?? '';
     const anchorOffset = visibleLine?.getBoundingClientRect().top ?? 0;
     const previousScrollY = window.scrollY;
@@ -1556,11 +1561,13 @@ async function refreshProjectView(root, requestedUrl, historyMode, force) {
                     url: target.href,
                     historyMode,
                     force,
+                    scrollMode,
                 });
             }
             return false;
         }
 
+        const renderScrollY = window.scrollY;
         const oldMaster = projectContent.querySelector('.master-player');
         const newMaster = nextContent.querySelector('.master-player');
         if (oldMaster && newMaster) newMaster.replaceWith(oldMaster);
@@ -1602,11 +1609,13 @@ async function refreshProjectView(root, requestedUrl, historyMode, force) {
         bindDeferredAudioRefresh(root, nextContent);
         bindPlaylist();
         delete root.dataset.refreshDeferred;
-        const restoredLine = anchorLineId
+        const restoredLine = scrollMode === 'line' && anchorLineId
             ? root.querySelector(`[data-line-id="${CSS.escape(anchorLineId)}"]`)
             : null;
         if (restoredLine) {
             window.scrollBy(0, restoredLine.getBoundingClientRect().top - anchorOffset);
+        } else if (scrollMode === 'viewport') {
+            window.scrollTo({ top: renderScrollY, behavior: 'instant' });
         } else {
             window.scrollTo(0, previousScrollY);
         }
@@ -1642,7 +1651,8 @@ async function refreshProjectView(root, requestedUrl, historyMode, force) {
                     root,
                     queued.url,
                     queued.historyMode,
-                    queued.force
+                    queued.force,
+                    queued.scrollMode
                 );
             }, 0);
         }
@@ -1715,7 +1725,7 @@ function bindProjectLive(root) {
             target.searchParams.set('filter', linkedFilter);
             target.searchParams.delete('characters[]');
             target.searchParams.delete('page');
-            void refreshProjectView(root, target.href, 'push', true);
+            void refreshProjectView(root, target.href, 'push', true, 'viewport');
             return;
         }
         void refreshProjectView(root, link.href, 'push', true);
@@ -1754,7 +1764,7 @@ function bindProjectLive(root) {
                 characterButton.classList.toggle('is-selected', wasSelected);
                 return;
             }
-            void refreshProjectView(root, target.href, 'push', true);
+            void refreshProjectView(root, target.href, 'push', true, 'viewport');
             return;
         }
     });
@@ -1834,7 +1844,11 @@ function bindProjectLive(root) {
         if (queued) {
             queuedProjectRefreshes.delete(root);
             void refreshProjectView(
-                root, queued.url, queued.historyMode, queued.force
+                root,
+                queued.url,
+                queued.historyMode,
+                queued.force,
+                queued.scrollMode
             );
             return;
         }
