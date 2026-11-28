@@ -101,13 +101,13 @@ nemůže měnit schéma, zadejte účet s oprávněním DDL do pole
 
 ### Aktualizace z verze 0.3.0 nebo 0.4.0
 
-Před aktualizací zálohujte databázi a úložiště. Nainstalujte vydání 0.4.2
+Před aktualizací zálohujte databázi a úložiště. Nainstalujte aktuální vydání
 přes **Aktualizace**. Při přechodu z 0.3.0 updater aplikuje migraci
 `0003_audio_profiles.php` pro tabulky profilů a projektových přiřazení;
-instalace 0.4.0 už tuto migraci obsahuje. Vydání 0.4.2 zachovává ploché cesty
+instalace 0.4.0 už tuto migraci obsahuje. Vydání od 0.4.2 zachovávají ploché cesty
 assetů, které podporuje updater 0.3.0. Pokud přechod na 0.4.0 skončil chybou
 o souboru mimo povolený seznam a aplikace se vrátila na 0.3.0, opakujte
-aktualizaci přímo balíčkem 0.4.2.
+aktualizaci přímo na aktuální vydání.
 
 ## Scénář
 
