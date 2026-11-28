@@ -1,7 +1,7 @@
 /*
  * Project: Dabing
  * Repository: klusik/dabing
- * File: public/assets/audio-profiles/preview-analysis.js
+ * File: public/assets/audio-profile-preview-analysis.js
  * Module Type: Browser audio analysis
  * Purpose: Capture compact stage-by-stage traces for profile previews.
  * Responsibilities: Summarize levels and EQ spectra without retaining stage audio buffers.

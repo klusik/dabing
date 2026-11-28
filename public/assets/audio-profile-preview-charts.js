@@ -1,7 +1,7 @@
 /*
  * Project: Dabing
  * Repository: klusik/dabing
- * File: public/assets/audio-profiles/preview-charts.js
+ * File: public/assets/audio-profile-preview-charts.js
  * Module Type: Browser preview charts
  * Purpose: Draw measured before/after effect previews for saved profiles.
  * Responsibilities: Render compact signal, spectrum and native EQ response plots.

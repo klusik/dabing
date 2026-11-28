@@ -27,9 +27,9 @@ $chainJson = json_encode($chain, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | J
 <section class="profile-editor" data-profile-editor
     data-chain="<?= Http::escape(is_string($chainJson) ? $chainJson : '[]') ?>"
     data-sample-url="<?= Http::escape((string) ($sample['url'] ?? '')) ?>"
-    data-preview-analysis-src="<?= Http::escape(Http::asset('audio-profiles/preview-analysis.js')) ?>"
-    data-preview-charts-src="<?= Http::escape(Http::asset('audio-profiles/preview-charts.js')) ?>"
-    data-preview-engine-src="<?= Http::escape(Http::asset('audio-profiles/engine.js')) ?>">
+    data-preview-analysis-src="<?= Http::escape(Http::asset('audio-profile-preview-analysis.js')) ?>"
+    data-preview-charts-src="<?= Http::escape(Http::asset('audio-profile-preview-charts.js')) ?>"
+    data-preview-engine-src="<?= Http::escape(Http::asset('audio-profile-engine.js')) ?>">
     <header class="profile-head">
         <a class="back-link" href="<?= Http::escape(Http::url('projects')) ?>" aria-label="Zpět na knihy">←</a>
         <h1>Zvukové profily</h1>

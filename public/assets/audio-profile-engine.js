@@ -1,17 +1,17 @@
 /*
  * Project: Dabing
  * Repository: klusik/dabing
- * File: public/assets/audio-profiles/engine.js
+ * File: public/assets/audio-profile-engine.js
  * Module Type: Browser audio engine
  * Purpose: Decode audio and render effects in saved order.
  * Responsibilities: Bound source memory and dispatch isolated DSP modules.
  * Author: Rudolf Klusal
  * License: All rights reserved
  */
-import { processEq } from './eq.js';
-import { processCompressor } from './compressor.js';
-import { processNormalize } from './normalize.js';
-import { processReverb } from './reverb.js';
+import { processEq } from './audio-profile-eq.js';
+import { processCompressor } from './audio-profile-compressor.js';
+import { processNormalize } from './audio-profile-normalize.js';
+import { processReverb } from './audio-profile-reverb.js';
 /** Type: number; Units: bytes; Scope: source; Consumers: local picker/engine.
  * Rationale: 20 MiB bounds decode memory for local input files.
  */

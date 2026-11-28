@@ -300,25 +300,18 @@ final class Http
         return $query;
     }
 
-    /** Build a relative URL for an existing allowlisted asset with a content digest.
-     * @param string $filename Flat public asset filename, optionally under audio-profiles/.
+    /** Build a relative URL for one existing flat public asset with a content digest.
+     * @param string $filename Simple flat public asset filename.
      * @return string Relative URL with digest, or base asset path when invalid or missing.
      */
     public static function asset(string $filename): string
     {
-        if (preg_match(
-            '/\A(?:(audio-profiles)\/)?([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})\z/',
-            $filename,
-            $matches
-        ) !== 1 || str_contains($filename, '..')) {
+        if (preg_match('/\A[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\z/', $filename) !== 1
+            || str_contains($filename, '..')) {
             return './public/assets/';
         }
-        $segments = array_values(array_filter([
-            $matches[1] ?? '', $matches[2] ?? '',
-        ], static fn (string $segment): bool => $segment !== ''));
         $assetPath = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'public'
-            . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR
-            . implode(DIRECTORY_SEPARATOR, $segments);
+            . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . $filename;
         if (!is_file($assetPath) || !is_readable($assetPath)) {
             return './public/assets/';
         }
@@ -326,8 +319,7 @@ final class Http
         if (!is_string($digest)) {
             return './public/assets/';
         }
-        return './public/assets/'
-            . implode('/', array_map('rawurlencode', $segments))
+        return './public/assets/' . rawurlencode($filename)
             . '?v=' . $digest;
     }
 
