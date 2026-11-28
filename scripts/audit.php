@@ -226,6 +226,7 @@ function auditMailTransport(): void
             throw new RuntimeException('Native mail capture did not contain five messages.');
         }
         $stage = 'validate sender and message assertions';
+        $headersByMessage = [];
         $messages = [];
         $argumentsByMessage = [];
         foreach ($matches as $match) {
@@ -233,7 +234,12 @@ function auditMailTransport(): void
             preg_match_all('/^<([^>\r\n]*)>$/m', $rawArguments, $argumentMatches);
             $argumentsByMessage[] = array_values($argumentMatches[1]);
             $rawMessage = (string) $match[2];
-            $messages[] = quoted_printable_decode($rawMessage);
+            $messageParts = preg_split('/\r?\n\r?\n/', $rawMessage, 2);
+            if (!is_array($messageParts) || count($messageParts) !== 2) {
+                throw new RuntimeException('Captured message headers were incomplete.');
+            }
+            $headersByMessage[] = $messageParts[0];
+            $messages[] = quoted_printable_decode($messageParts[1]);
         }
         $headerValue = static function (string $message, string $header): ?string {
             if (preg_match('/^' . preg_quote($header, '/')
@@ -300,8 +306,9 @@ function auditMailTransport(): void
         ];
         foreach ($messages as $index => $message) {
             $stage = 'validate message ' . ($index + 1) . ' sender and arguments';
-            $from = $headerValue($message, 'From');
-            $replyTo = $headerValue($message, 'Reply-To');
+            $headers = $headersByMessage[$index];
+            $from = $headerValue($headers, 'From');
+            $replyTo = $headerValue($headers, 'Reply-To');
             $expectedArguments = $expectedEnvelope[$index] === null
                 ? ['-t', '-i']
                 : ['-t', '-i', '-f', $expectedEnvelope[$index]];
@@ -329,23 +336,29 @@ function auditMailTransport(): void
                     'Mail envelope assertion failed.'
                 );
             }
-            if (!str_contains($message, 'multipart/alternative')
+            if (!str_contains($headers, 'multipart/alternative')
                 || !str_contains(
                     $message,
                     'http://books.example.test:8443/subdir/?route='
-                )) {
+                )
+                || $headerValue($headers, 'To') !== [
+                    'invite@dabing.test',
+                    'voice@dabing.test',
+                    'external@dabing.test',
+                    'configured@dabing.test',
+                    'invalid-admin@dabing.test',
+                ][$index]) {
                 throw new RuntimeException(
-                    'Captured message MIME type or public base URL was incorrect.'
+                    'Captured recipient, MIME type, or public base URL was incorrect.'
                 );
             }
         }
         $expectedContent = [
-            ['invite@dabing.test', 'route=email-join',
-                '0123456789abcdef0123456789abcdef'],
-            ['voice@dabing.test', 'route=project&id=73', 'Rook', 'Guard'],
-            ['external@dabing.test', 'route=email-join'],
-            ['configured@dabing.test', 'route=project&id=74', 'Pilot'],
-            ['invalid-admin@dabing.test'],
+            ['route=email-join', '0123456789abcdef0123456789abcdef'],
+            ['route=project&id=73', 'Rook', 'Guard'],
+            ['route=email-join'],
+            ['route=project&id=74', 'Pilot'],
+            [],
         ];
         foreach ($expectedContent as $index => $needles) {
             $stage = 'validate message ' . ($index + 1) . ' route and content';
