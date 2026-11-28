@@ -204,6 +204,78 @@ final class AudioProfileService
             && $value >= $minimum && $value <= $maximum;
     }
 
+    /** Index persisted project assignments once for studio and export resolution.
+     * @param list<array{scope:string,target_id:?int,character_name:?string,user_id:?int,profile_id:?int}> $rows Stored project assignments.
+     * @return array{voice:array<string,array<string,int>>,line:array<int,int>,take:array<int,int>} Maps retaining explicit no-effects choices as zero.
+     */
+    public function indexAssignments(array $rows): array
+    {
+        $indexed = ['voice' => [], 'line' => [], 'take' => []];
+        foreach ($rows as $row) {
+            $choice = $row['profile_id'] ?? 0;
+            if ($row['scope'] === 'voice'
+                && $row['character_name'] !== null
+                && $row['user_id'] !== null) {
+                $indexed['voice'][$row['character_name']][(string) $row['user_id']]
+                    = $choice;
+            } elseif ($row['scope'] === 'line' && $row['target_id'] !== null) {
+                $indexed['line'][$row['target_id']] = $choice;
+            } elseif ($row['scope'] === 'take' && $row['target_id'] !== null) {
+                $indexed['take'][$row['target_id']] = $choice;
+            }
+        }
+        return $indexed;
+    }
+
+    /** Resolve assignment precedence for one take, retaining the winning source.
+     * @param array{voice:array<string,array<string,int>>,line:array<int,int>,take:array<int,int>} $indexed Indexed project assignments.
+     * @param int $lineId Parent script line identifier.
+     * @param int $takeId Recording identifier.
+     * @param string $character Exact character name for the line.
+     * @param int|null $actorId User who recorded the take, when present.
+     * @return array{profile_id:?int,source:?string} Null source means no assignment; a zero choice stops inheritance.
+     */
+    public function resolveAssignment(
+        array $indexed,
+        int $lineId,
+        int $takeId,
+        string $character,
+        ?int $actorId
+    ): array {
+        if (array_key_exists($takeId, $indexed['take'])) {
+            $choice = $indexed['take'][$takeId];
+            $source = 'take';
+        } elseif (array_key_exists($lineId, $indexed['line'])) {
+            $choice = $indexed['line'][$lineId];
+            $source = 'line';
+        } elseif ($actorId !== null
+            && array_key_exists($character, $indexed['voice'])
+            && array_key_exists((string) $actorId, $indexed['voice'][$character])) {
+            $choice = $indexed['voice'][$character][(string) $actorId];
+            $source = 'voice';
+        } else {
+            $choice = null;
+            $source = null;
+        }
+        return [
+
+            'profile_id' => is_int($choice) && $choice > 0 ? $choice : null,
+            'source' => $source,
+        ];
+    }
+    /** Report whether a canonical profile chain contains an enabled module.
+     * @param list<array{type:string,enabled:bool,settings:array<string,mixed>}> $chain Validated ordered module chain.
+     * @return bool True when at least one module can alter audio.
+     */
+    public function hasEnabledEffects(array $chain): bool
+    {
+        foreach ($chain as $module) {
+            if (!empty($module['enabled'])) {
+                return true;
+            }
+        }
+        return false;
+    }
     /** Persist a validated profile.
      * @param int|null $id Existing profile identifier.
      * @param string $name Submitted display name.

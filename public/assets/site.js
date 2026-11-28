@@ -1365,12 +1365,24 @@ function preserveProjectLineControls(current, next) {
                         'select[name="profile"]'
                     );
                     if (oldSelect && newSelect) {
-                        const selectedProfile = newSelect.value;
+                        const oldForm = oldSelect.closest('form');
+                        const newForm = newSelect.closest('form');
+                        const isPending = oldForm?.dataset.pending === 'true';
+                        const selectedProfile = isPending ? oldSelect.value : newSelect.value;
                         oldSelect.replaceChildren(...Array.from(
                             newSelect.options,
                             (option) => option.cloneNode(true)
                         ));
                         oldSelect.value = selectedProfile;
+                        if (newForm?.dataset.confirmedProfile !== undefined) {
+                            oldForm.dataset.confirmedProfile = newForm.dataset.confirmedProfile;
+                        }
+                        const oldEffective = oldForm?.querySelector('[data-audio-profile-effective]');
+                        const newEffective = newForm?.querySelector('[data-audio-profile-effective]');
+                        if (oldEffective && newEffective) oldEffective.textContent = newEffective.textContent;
+                        const oldStatus = oldForm?.querySelector('[data-audio-profile-status]');
+                        const newStatus = newForm?.querySelector('[data-audio-profile-status]');
+                        if (oldStatus && newStatus && !isPending) oldStatus.textContent = newStatus.textContent;
                     }
                     const oldTrigger = oldControl.querySelector(
                         '[data-panel-trigger]'
@@ -1531,6 +1543,8 @@ function syncProjectShell(current, next) {
     current.dataset.revision = next.dataset.revision ?? '';
     current.dataset.pagingEnabled = next.dataset.pagingEnabled ?? 'off';
     current.dataset.audioProfiles = next.dataset.audioProfiles ?? '[]';
+    current.dataset.audioVoiceRules = next.dataset.audioVoiceRules ?? '{}';
+    syncAudioProfileBulkPicker(current, next);
 }
 
 /**
@@ -1717,6 +1731,153 @@ async function refreshProjectView(root, requestedUrl, historyMode, force, scroll
 }
 
 /**
+ * Read the latest voice-rule map embedded in the project root.
+ * @param {HTMLElement} root - The current project root.
+ * @returns {Record<string, Record<string, number>>} Character/user assignments.
+ */
+function readAudioVoiceRules(root) {
+    try {
+        const rules = JSON.parse(root.dataset.audioVoiceRules ?? '{}');
+        return rules && typeof rules === 'object' ? rules : {};
+    } catch (error) {
+        return {};
+    }
+}
+
+/**
+ * Return the picker value for one voice pair without changing the server map.
+ * @param {HTMLElement} root - The current project root.
+ * @param {string} character - Exact character name.
+ * @param {string} userId - Actor account ID.
+ * @returns {string} An explicit profile choice or inherit.
+ */
+function audioVoiceRuleChoice(root, character, userId) {
+    const rules = readAudioVoiceRules(root);
+    if (!Object.prototype.hasOwnProperty.call(rules, character)) return 'inherit';
+    const characterRules = rules[character];
+    if (!characterRules || typeof characterRules !== 'object'
+        || !Object.prototype.hasOwnProperty.call(characterRules, userId)) {
+        return 'inherit';
+    }
+    const profileId = Number(characterRules[userId]);
+    return profileId === 0 ? 'none' : String(profileId);
+}
+
+/**
+ * Save the selected pair as a local UI preference scoped to this account/book.
+ * @param {HTMLElement} root - The current project root.
+ * @param {string} character - Exact character name.
+ * @param {string} userId - Actor account ID.
+ * @returns {void} Storage errors leave the server-backed picker usable.
+ */
+function storeAudioProfilePair(root, character, userId) {
+    try {
+        const key = `dabing:audio-profile-pair:${root.dataset.accountId ?? ''}:${root.dataset.projectId ?? ''}`;
+        localStorage.setItem(key, JSON.stringify({ character, userId }));
+    } catch (error) {
+        // The current pair remains usable when browser storage is unavailable.
+    }
+}
+
+/**
+ * Apply a selected voice pair's server rule to the picker without submitting it.
+ * @param {HTMLElement} root - The current project root.
+ * @param {HTMLFormElement} form - The voice assignment form.
+ * @returns {void} Missing or unavailable profile IDs fall back to inheritance.
+ */
+function showAudioProfilePairRule(root, form) {
+    const character = form.querySelector('[name="character"]');
+    const user = form.querySelector('[name="user_id"]');
+    const profile = form.querySelector('[name="profile"]');
+    if (!character || !user || !profile) return;
+    const choice = audioVoiceRuleChoice(root, character.value, user.value);
+    profile.value = Array.from(profile.options).some((option) => option.value === choice)
+        ? choice : 'inherit';
+    form.dataset.confirmedProfile = profile.value;
+    const status = form.querySelector('[data-audio-profile-status]');
+    if (status && form.dataset.initialized === 'true') {
+        status.textContent = profile.value === 'inherit'
+            ? 'Bez pravidla pro tuto dvojici.'
+            : 'Pravidlo je již uloženo pro tuto knihu.';
+    }
+}
+
+/**
+ * Restore a validated account/book pair and reflect its saved rule in the picker.
+ * @param {HTMLElement} root - The current project root.
+ * @returns {void} Invalid saved choices fall back to the first available pair.
+ */
+function initializeAudioProfilePair(root) {
+    const form = root.querySelector('[data-audio-profile-assignment][data-scope="voice"]');
+    if (!form) return;
+    const character = form.querySelector('[name="character"]');
+    const user = form.querySelector('[name="user_id"]');
+    if (!character || !user) return;
+    const key = `dabing:audio-profile-pair:${root.dataset.accountId ?? ''}:${root.dataset.projectId ?? ''}`;
+    try {
+        const saved = JSON.parse(localStorage.getItem(key) ?? 'null');
+        if (saved && Array.from(character.options).some((option) => option.value === saved.character)
+            && Array.from(user.options).some((option) => option.value === String(saved.userId))) {
+            character.value = saved.character;
+            user.value = String(saved.userId);
+        }
+    } catch (error) {
+        // Server defaults are retained when local storage contains invalid data.
+    }
+    form.dataset.initialized = 'true';
+    storeAudioProfilePair(root, character.value, user.value);
+    showAudioProfilePairRule(root, form);
+}
+
+/**
+ * Replace a confirmed voice rule in the in-memory map after a successful POST.
+ * @param {HTMLElement} root - The current project root.
+ * @param {string} character - Exact character name from the submitted snapshot.
+ * @param {string} userId - Actor ID from the submitted snapshot.
+ * @param {string} choice - inherit, none, or a positive profile ID.
+ * @returns {void} The updated map is used by later pair switches and refreshes.
+ */
+function updateAudioVoiceRule(root, character, userId, choice) {
+    const rules = readAudioVoiceRules(root);
+    const actorMap = Object.prototype.hasOwnProperty.call(rules, character)
+        && rules[character] && typeof rules[character] === 'object'
+        ? { ...rules[character] } : {};
+    if (choice === 'inherit') delete actorMap[userId];
+    else actorMap[userId] = choice === 'none' ? 0 : Number(choice);
+    root.dataset.audioVoiceRules = JSON.stringify({ ...rules, [character]: actorMap });
+}
+
+/**
+ * Keep the persistent bulk picker aligned with a refreshed server-rendered rule map.
+ * @param {HTMLElement} root - The live project root.
+ * @param {HTMLElement} next - Parsed project root containing fresh options.
+ * @returns {void} Pair preference is retained only while valid in fresh options.
+ */
+function syncAudioProfileBulkPicker(root, next) {
+    const currentForm = root.querySelector('[data-audio-profile-assignment][data-scope="voice"]');
+    const freshForm = next.querySelector('[data-audio-profile-assignment][data-scope="voice"]');
+    if (!currentForm || !freshForm) return;
+    for (const name of ['character', 'user_id']) {
+        const current = currentForm.querySelector(`[name="${name}"]`);
+        const fresh = freshForm.querySelector(`[name="${name}"]`);
+        if (!current || !fresh) continue;
+        const selected = current.value;
+        current.replaceChildren(...Array.from(fresh.options, (option) => option.cloneNode(true)));
+        current.value = Array.from(current.options).some((option) => option.value === selected)
+            ? selected : (current.options[0]?.value ?? '');
+    }
+    const currentProfile = currentForm.querySelector('[name="profile"]');
+    const freshProfile = freshForm.querySelector('[name="profile"]');
+    if (currentProfile && freshProfile) {
+        const selected = currentProfile.value;
+        currentProfile.replaceChildren(...Array.from(freshProfile.options, (option) => option.cloneNode(true)));
+        currentProfile.value = Array.from(currentProfile.options).some((option) => option.value === selected)
+            ? selected : 'inherit';
+    }
+    if (currentForm.dataset.pending !== 'true') initializeAudioProfilePair(root);
+}
+
+/**
  * Start account-scoped paging persistence, async book actions and revision polling.
  * @param {HTMLElement} root - The authenticated project root.
  * @returns {void} In-book navigation and shared updates use scoped HTML requests.
@@ -1726,6 +1887,7 @@ function bindProjectLive(root) {
     root.dataset.liveBound = 'true';
     const projectId = root.dataset.projectId ?? '';
     const accountId = root.dataset.accountId ?? '';
+    initializeAudioProfilePair(root);
     const storageKey = `dabing:paging:${accountId}:${projectId}`;
     const currentUrl = new URL(window.location.href);
     const hasPaging = currentUrl.searchParams.has('paging');
@@ -1826,8 +1988,27 @@ function bindProjectLive(root) {
         }
     });
     document.addEventListener('change', (event) => {
-        if (!(event.target instanceof HTMLInputElement) || !root.contains(event.target)) return;
-        if (!event.target.matches('[data-paging-switch]')) return;
+        if (!(event.target instanceof HTMLSelectElement) || !root.contains(event.target)) {
+            if (!(event.target instanceof HTMLInputElement) || !root.contains(event.target)
+                || !event.target.matches('[data-paging-switch]')) return;
+        }
+        const profileForm = event.target.closest('[data-audio-profile-assignment]');
+        if (profileForm && event.target.matches('[data-audio-profile-pair]')) {
+            if (profileForm.dataset.pending === 'true') return;
+            const character = profileForm.querySelector('[name="character"]');
+            const user = profileForm.querySelector('[name="user_id"]');
+            if (character && user) {
+                storeAudioProfilePair(root, character.value, user.value);
+                showAudioProfilePairRule(root, profileForm);
+            }
+            return;
+        }
+        if (profileForm && event.target.matches('select[name="profile"]')) {
+            if (profileForm.dataset.pending !== 'true') profileForm.requestSubmit();
+            return;
+        }
+        if (!(event.target instanceof HTMLInputElement)
+            || !event.target.matches('[data-paging-switch]')) return;
         if (activeCaptureCard) {
             setProjectStatus(root, activeCaptureCard
                 ? 'Nejdřív dokončete nebo uložte rozpracovanou nahrávku.'
@@ -1848,7 +2029,20 @@ function bindProjectLive(root) {
             || !form.matches('[data-project-async]') || !root.contains(form)) return;
         event.preventDefault();
         if (form.dataset.pending === 'true') return;
+        const isAudioProfile = form.matches('[data-audio-profile-assignment]');
+        const profileSelect = isAudioProfile ? form.querySelector('[name="profile"]') : null;
+        const submittedChoice = profileSelect?.value ?? '';
+        const characterSelect = form.querySelector('[name="character"]');
+        const userSelect = form.querySelector('[name="user_id"]');
+        const submittedCharacter = characterSelect?.value ?? '';
+        const submittedUserId = userSelect?.value ?? '';
+        const payload = new FormData(form);
         form.dataset.pending = 'true';
+        if (isAudioProfile) {
+            form.querySelectorAll('select').forEach((select) => { select.disabled = true; });
+            const status = form.querySelector('[data-audio-profile-status]');
+            if (status) status.textContent = 'Ukládám…';
+        }
         const submitter = event.submitter instanceof HTMLButtonElement
             ? event.submitter : null;
         submitter?.setAttribute('aria-busy', 'true');
@@ -1862,9 +2056,10 @@ function bindProjectLive(root) {
         try {
             const response = await fetch(form.action, {
                 method: 'POST',
-                body: new FormData(form),
+                body: payload,
                 headers: { Accept: 'application/json' },
                 credentials: 'same-origin',
+                ...(isAudioProfile ? { keepalive: true } : {}),
             });
             let result;
             try {
@@ -1875,12 +2070,35 @@ function bindProjectLive(root) {
             if (!response.ok || result.ok !== true) {
                 throw new Error(result.message ?? 'Změnu se nepodařilo uložit.');
             }
+            if (isAudioProfile) {
+                form.dataset.confirmedProfile = submittedChoice;
+                if (form.dataset.scope === 'voice') {
+                    updateAudioVoiceRule(root, submittedCharacter, submittedUserId, submittedChoice);
+                }
+                const status = form.querySelector('[data-audio-profile-status]');
+                if (status) status.textContent = result.message ?? 'Změna uložena.';
+            }
             say(result.message ?? 'Změna byla uložena.');
             window.dispatchEvent(new Event('dabing:project-refresh'));
         } catch (error) {
-            say(error instanceof Error
-                ? error.message : 'Změnu se nepodařilo uložit.');
+            if (isAudioProfile && profileSelect) {
+                const confirmed = form.dataset.scope === 'voice'
+                    ? audioVoiceRuleChoice(root, submittedCharacter, submittedUserId)
+                    : (form.dataset.confirmedProfile ?? 'inherit');
+                profileSelect.value = Array.from(profileSelect.options)
+                    .some((option) => option.value === confirmed) ? confirmed : 'inherit';
+            }
+            const message = error instanceof Error
+                ? error.message : 'Změnu se nepodařilo uložit.';
+            if (isAudioProfile) {
+                const status = form.querySelector('[data-audio-profile-status]');
+                if (status) status.textContent = message;
+            }
+            say(message);
         } finally {
+            if (isAudioProfile) {
+                form.querySelectorAll('select').forEach((select) => { select.disabled = false; });
+            }
             delete form.dataset.pending;
             submitter?.removeAttribute('aria-busy');
         }

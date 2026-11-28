@@ -133,3 +133,14 @@
     .take-row.has-audio-profile-control > .take-audio-profile-control .audio-profile-trigger { width: 32px; }
     .take-row.has-audio-profile-control > audio { height: 32px; }
 }
+
+.audio-profile-scope-note,
+.audio-profile-effective,
+.audio-profile-popover [data-audio-profile-status] {
+    margin: 0;
+    color: var(--muted, #66766d);
+    font-size: .72rem;
+    line-height: 1.35;
+}
+.audio-profile-popover [data-audio-profile-status]:not(:empty) { color: var(--forest-deep, #274536); }
+.audio-profile-popover select:disabled { opacity: .65; }
