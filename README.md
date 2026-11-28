@@ -59,7 +59,9 @@ postavy a hlasu. Neexistující přiřazení dědí nastavení; explicitní volb
 „Bez efektů“ dědění zastaví. Priorita je pokus, replika a potom pravidlo
 postavy a hlasu. Přiřazení repliky platí i pro budoucí pokusy. Globální editor
 otevřete ikonou noty v navigaci správce. V něm lze přehrát vzorovou nahrávku
-z projektu nebo místní zvukový soubor.
+z projektu nebo místní zvukový soubor. V knize otevře „Vyzkoušet“ u pokusu
+stejný editor v okně nad knihou. Křížek nebo Escape zavře náhled a vrátí vás
+na stejné místo v knize.
 
 Každý vybraný efekt má vlastní graf a ovládací prvky. Graf při přehrávání
 ukazuje naměřený signál před a po daném kroku: u EQ spektrum, u ostatních

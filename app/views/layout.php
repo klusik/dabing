@@ -12,6 +12,8 @@ use Dabing\Http;
  * Author: Rudolf Klusal
  * License: All rights reserved
  */
+$embeddedAudioProfileEditor = ($view ?? '') === 'audio-profiles'
+    && !empty($data['embedded']);
 ?>
 <!doctype html>
 <html lang="cs">
@@ -36,8 +38,9 @@ use Dabing\Http;
         <script type="module" src="<?= Http::escape(Http::asset('studio-audio-profiles.js')) ?>"></script>
     <?php endif; ?>
 </head>
-<body>
-    <a class="skip-link" href="#main">Přejít k obsahu</a>
+<body<?= $embeddedAudioProfileEditor ? ' class="audio-profile-embedded"' : '' ?>>
+    <?php if (!$embeddedAudioProfileEditor): ?>
+        <a class="skip-link" href="#main">Přejít k obsahu</a>
     <header class="site-header">
         <a class="brand" href="<?= Http::escape(Http::url($user ? 'projects' : 'login')) ?>" aria-label="Dabing — domů">
             <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
@@ -61,15 +64,18 @@ use Dabing\Http;
             <?php endif; ?>
         </nav>
     </header>
+    <?php endif; ?>
     <?php if (isset($notice) && is_array($notice)): ?>
         <div class="notice notice-<?= Http::escape((string) ($notice['type'] ?? 'info')) ?>" role="status">
             <span class="notice-symbol" aria-hidden="true">✳</span>
             <p><?= Http::escape((string) ($notice['message'] ?? '')) ?></p>
         </div>
     <?php endif; ?>
-    <main id="main" class="site-main">
+    <main id="main" class="site-main<?= $embeddedAudioProfileEditor ? ' audio-profile-embedded-main' : '' ?>">
         <?php require $template; ?>
     </main>
+    <?php if (!$embeddedAudioProfileEditor): ?>
     <footer class="site-footer"><span>© <?= date('Y') ?> Dabing</span></footer>
+    <?php endif; ?>
 </body>
 </html>

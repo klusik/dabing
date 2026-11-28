@@ -7,7 +7,7 @@ use Dabing\Http;
  * Repository: klusik/dabing
  * File: app/views/audio-profiles.php
  * Module Type: View
- * Purpose: Present the standalone audio profile editor.
+ * Purpose: Present the standalone or embedded audio profile editor.
  * Responsibilities: Render profile selection, ordered effects and local preview.
  * Author: Rudolf Klusal
  * License: All rights reserved
@@ -16,6 +16,12 @@ $profiles = is_array($data['profiles'] ?? null) ? $data['profiles'] : [];
 $profile = is_array($data['profile'] ?? null) ? $data['profile'] : null;
 $defaultChain = is_array($data['default_chain'] ?? null) ? $data['default_chain'] : [];
 $sample = is_array($data['sample'] ?? null) ? $data['sample'] : null;
+$embedded = !empty($data['embedded']);
+$sampleProjectId = is_int($sample['project_id'] ?? null)
+    ? $sample['project_id'] : null;
+$backUrl = $sampleProjectId !== null
+    ? Http::url('project', ['id' => $sampleProjectId])
+    : Http::url('projects');
 $chain = $profile !== null && is_array($profile['chain'] ?? null)
     ? $profile['chain'] : $defaultChain;
 $submittedJson = is_string($data['submitted_chain_json'] ?? null)
@@ -25,13 +31,19 @@ $chain = is_array($submittedChain) ? $submittedChain : $chain;
 $chainJson = json_encode($chain, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT);
 ?>
 <section class="profile-editor" data-profile-editor
+    data-embedded="<?= $embedded ? 'true' : 'false' ?>"
+    <?= $embedded && !empty($data['audio_profile_saved'])
+        ? 'data-audio-profile-saved="true"' : '' ?>
     data-chain="<?= Http::escape(is_string($chainJson) ? $chainJson : '[]') ?>"
     data-sample-url="<?= Http::escape((string) ($sample['url'] ?? '')) ?>"
     data-preview-analysis-src="<?= Http::escape(Http::asset('audio-profile-preview-analysis.js')) ?>"
     data-preview-charts-src="<?= Http::escape(Http::asset('audio-profile-preview-charts.js')) ?>"
     data-preview-engine-src="<?= Http::escape(Http::asset('audio-profile-engine.js')) ?>">
     <header class="profile-head">
-        <a class="back-link" href="<?= Http::escape(Http::url('projects')) ?>" aria-label="Zpět na knihy">←</a>
+        <?php if (!$embedded): ?>
+            <a class="back-link" href="<?= Http::escape($backUrl) ?>"
+                aria-label="<?= $sampleProjectId !== null ? 'Zpět do knihy' : 'Zpět na knihy' ?>">←</a>
+        <?php endif; ?>
         <h1>Zvukové profily</h1>
     </header>
     <div class="profile-toolbar">
@@ -87,6 +99,7 @@ $chainJson = json_encode($chain, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | J
         <input type="hidden" name="action" value="save">
         <input type="hidden" name="profile_id" value="<?= Http::escape((string) ($data['profile_id'] ?? $profile['id'] ?? '')) ?>" data-profile-id>
         <input type="hidden" name="sample" value="<?= Http::escape((string) ($sample['id'] ?? '')) ?>">
+        <input type="hidden" name="embed" value="<?= $embedded ? '1' : '' ?>">
         <input type="hidden" name="chain" value="<?= Http::escape(is_string($chainJson) ? $chainJson : '[]') ?>" data-chain-input>
         <label for="profile-name">Název profilu</label>
         <input id="profile-name" name="name" maxlength="120" required value="<?= Http::escape((string) ($data['submitted_name'] ?? $profile['name'] ?? '')) ?>" placeholder="Např. Teplý hlas">

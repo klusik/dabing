@@ -8,6 +8,23 @@
  * Author: Rudolf Klusal
  * License: All rights reserved
  */
+body.audio-profile-embedded .site-main {
+    width: 100%;
+    min-height: 0;
+    margin: 0;
+    padding: 8px;
+}
+body.audio-profile-embedded .notice {
+    width: auto;
+    margin: 6px 8px 0;
+    padding: 8px 10px;
+    border-radius: 9px;
+}
+body.audio-profile-embedded .profile-editor {
+    max-width: none;
+    margin: 0;
+}
+body.audio-profile-embedded .profile-head { margin-bottom: 8px; }
 .profile-editor {
     --mixer: #202922;
     --mixer-raised: #2b372f;
@@ -18,6 +35,7 @@
     margin: 0 auto;
     color: var(--mixer-text);
 }
+body.audio-profile-embedded .profile-head { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 .profile-head { display:flex; align-items:center; gap:12px; margin-bottom:12px; color:var(--ink); }
 .profile-head h1 { margin:0; font-size:clamp(20px,3vw,28px); }
 .profile-head .back-link { color:var(--forest); text-decoration:none; font-size:22px; }
@@ -102,7 +120,8 @@
     .monitor-strip audio { grid-column:1/-1; }
 }
 @media(max-width:600px) {
-    .profile-editor { width:100%; }
+    .profile-editor { box-sizing: border-box; width: 100%; }
+
     .profile-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:6px; padding:7px; }
     .profile-select-label { grid-column:1; min-width:0; font-size:0; }
     .profile-select-label select { width:100%; min-width:0; flex:1; font-size:12px; }

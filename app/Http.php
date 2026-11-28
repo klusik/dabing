@@ -31,6 +31,8 @@ final class Http
      */
     private const MAX_PATH_DECODE_PASSES = 5;
 
+    /** Fixed security policy shared by framed and unframed application pages. */
+    private const CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'";
     /** Start a hardened session and apply response security headers.
      * @return void No return value.
      */
@@ -67,13 +69,29 @@ final class Http
         if (headers_sent()) {
             return;
         }
-        header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'");
+        header('Content-Security-Policy: ' . self::CONTENT_SECURITY_POLICY);
         header('Referrer-Policy: no-referrer');
         header('X-Content-Type-Options: nosniff');
         header('Permissions-Policy: microphone=(self), camera=()');
         header('Cache-Control: no-store');
     }
 
+    /** Allow an authorized editor response to be framed by this origin.
+     * @return void Replaces only frame-ancestors when response headers remain
+     * writable.
+     */
+    public static function allowSameOriginFraming(): void
+    {
+        if (headers_sent()) {
+            return;
+        }
+        $policy = str_replace(
+            "frame-ancestors 'none'",
+            "frame-ancestors 'self'",
+            self::CONTENT_SECURITY_POLICY
+        );
+        header('Content-Security-Policy: ' . $policy);
+    }
     /** Return the normalized request method.
      * @return string Uppercase method, or GET when absent.
      */
@@ -361,9 +379,10 @@ final class Http
      *     audio_profiles?:list<array{id:int,name:string,chain:list<array<string,mixed>>}>,
      *     audio_voice_rules?:array<string,array<string,int>>,
      *     audio_has_effects?:bool,
+     *     embedded?:bool,audio_profile_saved?:bool,
      *     profile?:array{id:int,name:string,chain:list<array<string,mixed>>}|null,
      *     default_chain?:list<array{type:string,enabled:bool,settings:array<string,mixed>}>,
-     *     sample?:array{id:int,url:string,label:string}|null,
+     *     sample?:array{id:int,project_id?:int,url:string,label:string}|null,
      *     form_error?:string|null,submitted_name?:string|null,
      *     submitted_chain_json?:string|null,profile_id?:int|null,
      *     can_invite?:bool,has_recordings?:bool,is_admin?:bool,export_url?:string,

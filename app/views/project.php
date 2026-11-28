@@ -499,4 +499,13 @@ if ($filter === 'characters') {
     </aside>
 </div>
 </div>
+<dialog class="profile-preview-dialog" data-profile-preview-dialog aria-labelledby="profile-preview-title">
+    <div class="profile-preview-shell">
+        <header class="profile-preview-header">
+            <h2 id="profile-preview-title">Vyzkoušet zvukový profil</h2>
+            <button type="button" class="icon-control profile-preview-close" data-profile-preview-close aria-label="Zavřít náhled" title="Zavřít náhled"><span aria-hidden="true">×</span></button>
+        </header>
+        <iframe data-profile-preview-frame title="Náhled zvukového profilu" allow="autoplay"></iframe>
+    </div>
+</dialog>
 </div>
