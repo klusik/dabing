@@ -1143,6 +1143,28 @@ function bindPlaylist() {
     }
     const items = () => Array.from(document.querySelectorAll('[data-play-item]'));
     const status = () => document.querySelector('[data-playlist-status]');
+    const scrollToPlaylistLine = (item) => {
+        const lineId = item.dataset.playLineId ?? '';
+        if (!lineId) return;
+        const root = document.querySelector('[data-project-live]');
+        const line = document.getElementById(`line-${lineId}`);
+        if (line && root?.contains(line)) {
+            line.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            return;
+        }
+        if (!root) return;
+        const baseUrl = root.dataset.pendingNavigationUrl
+            || root.dataset.lastUrl
+            || window.location.href;
+        const target = new URL(baseUrl, window.location.href);
+        if (item.dataset.playInFilter !== '1') {
+            target.searchParams.delete('filter');
+            target.searchParams.delete('characters[]');
+        }
+        target.searchParams.set('page', item.dataset.playLinePage ?? '1');
+        root.dataset.pendingPlaylistLineId = lineId;
+        void refreshProjectView(root, target.href, 'push', true);
+    };
     const playIndex = (index, shouldPlay) => {
         const currentItems = items();
         if (index < 0 || index >= currentItems.length) return;
@@ -1185,6 +1207,11 @@ function bindPlaylist() {
         playlistDocumentHandlersBound = true;
         document.addEventListener('click', (event) => {
             if (!(event.target instanceof Element)) return;
+            const jump = event.target.closest('[data-play-jump]');
+            if (jump) {
+                scrollToPlaylistLine(jump);
+                return;
+            }
             const item = event.target.closest('[data-play-item]');
             const activePlayer = document.querySelector('[data-story-player]');
             if (!(activePlayer instanceof HTMLAudioElement)) return;
@@ -1352,17 +1379,23 @@ function syncProjectShell(current, next) {
         }
     });
 
-    const currentCharacters = current.querySelector('.character-filter-list');
-    const nextCharacters = next.querySelector('.character-filter-list');
+    const currentCharacters = current.querySelector('.character-filter-cells');
+    const nextCharacters = next.querySelector('.character-filter-cells');
     if (currentCharacters && nextCharacters) {
-        const nextChecked = new Map(Array.from(
+        const nextSelected = new Map(Array.from(
             nextCharacters.querySelectorAll('[data-character-filter]')
-        ).map((input) => [input.value, input.checked]));
+        ).map((button) => [button.value, button.getAttribute('aria-pressed') === 'true']));
         currentCharacters.querySelectorAll('[data-character-filter]')
-            .forEach((input) => {
-                if (nextChecked.has(input.value)) {
-                    input.checked = nextChecked.get(input.value);
-                }
+            .forEach((button) => {
+                const fresh = nextCharacters.querySelector(
+                    `[data-character-filter][value="${CSS.escape(button.value)}"]`
+                );
+                if (!fresh) return;
+                const selected = nextSelected.get(button.value);
+                button.setAttribute('aria-pressed', String(selected));
+                button.classList.toggle('is-selected', selected);
+                button.title = fresh.title;
+                button.innerHTML = fresh.innerHTML;
             });
     }
     const currentCharacterTrigger = current.querySelector(
@@ -1451,6 +1484,14 @@ function syncProjectShell(current, next) {
 async function refreshProjectView(root, requestedUrl, historyMode, force) {
     if (activeCaptureCard || hasActiveLinePlayback()) {
         root.dataset.refreshDeferred = 'true';
+        if (historyMode !== 'none') {
+            queuedProjectRefreshes.set(root, {
+                url: requestedUrl,
+                historyMode,
+                force,
+            });
+            root.dataset.pendingNavigationUrl = requestedUrl;
+        }
         return false;
     }
     if (root.dataset.refreshing === 'true') {
@@ -1459,10 +1500,12 @@ async function refreshProjectView(root, requestedUrl, historyMode, force) {
             historyMode,
             force,
         });
+        if (historyMode !== 'none') root.dataset.pendingNavigationUrl = requestedUrl;
         return false;
     }
     root.dataset.refreshing = 'true';
     const target = new URL(requestedUrl, window.location.href);
+    if (historyMode !== 'none') root.dataset.pendingNavigationUrl = target.href;
     target.searchParams.delete('view');
     const projectContent = root.querySelector('[data-project-content]');
     const visibleLine = Array.from(root.querySelectorAll('[data-line-card]'))
@@ -1505,6 +1548,13 @@ async function refreshProjectView(root, requestedUrl, historyMode, force) {
         }
         if (activeCaptureCard || hasActiveLinePlayback()) {
             root.dataset.refreshDeferred = 'true';
+            if (historyMode !== 'none') {
+                queuedProjectRefreshes.set(root, {
+                    url: target.href,
+                    historyMode,
+                    force,
+                });
+            }
             return false;
         }
 
@@ -1557,7 +1607,20 @@ async function refreshProjectView(root, requestedUrl, historyMode, force) {
         } else {
             window.scrollTo(0, previousScrollY);
         }
+        const playlistLineId = root.dataset.pendingPlaylistLineId;
+        if (playlistLineId) {
+            const playlistLine = document.getElementById(
+                `line-${playlistLineId}`
+            );
+            if (playlistLine && root.contains(playlistLine)) {
+                playlistLine.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                delete root.dataset.pendingPlaylistLineId;
+            }
+        }
         root.dataset.lastUrl = target.href;
+        if (root.dataset.pendingNavigationUrl === target.href) {
+            delete root.dataset.pendingNavigationUrl;
+        }
         return true;
     } catch (error) {
         setProjectStatus(
@@ -1568,7 +1631,8 @@ async function refreshProjectView(root, requestedUrl, historyMode, force) {
     } finally {
         delete root.dataset.refreshing;
         const queued = queuedProjectRefreshes.get(root);
-        if (queued && root.dataset.pollPaused !== 'true') {
+        if (queued && root.dataset.pollPaused !== 'true'
+            && !activeCaptureCard && !hasActiveLinePlayback()) {
             queuedProjectRefreshes.delete(root);
             window.setTimeout(() => {
                 void refreshProjectView(
@@ -1632,21 +1696,43 @@ function bindProjectLive(root) {
         if (!link || !root.contains(link) || event.button !== 0
             || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
-        if (activeCaptureCard || hasActiveLinePlayback()) {
+        if (activeCaptureCard) {
             setProjectStatus(root, activeCaptureCard
                 ? 'Nejdřív dokončete nebo uložte rozpracovanou nahrávku.'
                 : 'Po skončení přehrávání můžete změnit zobrazení.');
             return;
         }
+        const linkedFilter = new URL(link.href).searchParams.get('filter') ?? '';
+        if (['all', 'mine'].includes(linkedFilter)) {
+            root.querySelectorAll('[data-character-filter]').forEach((button) => {
+                button.setAttribute('aria-pressed', 'false');
+                button.classList.remove('is-selected');
+            });
+            const target = new URL(root.dataset.pendingNavigationUrl || link.href);
+            target.searchParams.set('filter', linkedFilter);
+            target.searchParams.delete('characters[]');
+            target.searchParams.delete('page');
+            void refreshProjectView(root, target.href, 'push', true);
+            return;
+        }
         void refreshProjectView(root, link.href, 'push', true);
     });
-    document.addEventListener('change', (event) => {
-        if (!(event.target instanceof HTMLInputElement) || !root.contains(event.target)) return;
-        if (event.target.matches('[data-character-filter]')) {
-            const selected = Array.from(
-                root.querySelectorAll('[data-character-filter]:checked')
-            ).map((input) => input.value);
-            const target = new URL(window.location.href);
+    document.addEventListener('click', (event) => {
+        if (!(event.target instanceof Element)) return;
+        const characterButton = event.target.closest('button[data-character-filter]');
+        if (characterButton && root.contains(characterButton)) {
+            const selectedNames = new Set(Array.from(
+                root.querySelectorAll('[data-character-filter][aria-pressed="true"]')
+            ).map((button) => button.value));
+            const wasSelected = selectedNames.has(characterButton.value);
+            if (wasSelected) selectedNames.delete(characterButton.value);
+            else selectedNames.add(characterButton.value);
+            characterButton.setAttribute('aria-pressed', String(!wasSelected));
+            characterButton.classList.toggle('is-selected', !wasSelected);
+            const selected = Array.from(selectedNames);
+            const target = new URL(
+                root.dataset.pendingNavigationUrl || window.location.href
+            );
             target.searchParams.delete('page');
             target.searchParams.delete('characters[]');
             if (selected.length === 0) {
@@ -1657,25 +1743,31 @@ function bindProjectLive(root) {
                     target.searchParams.append('characters[]', character);
                 });
             }
-            if (activeCaptureCard || hasActiveLinePlayback()) {
+            if (activeCaptureCard) {
                 setProjectStatus(root, activeCaptureCard
                     ? 'Nejdřív dokončete nebo uložte rozpracovanou nahrávku.'
                     : 'Po skončení přehrávání můžete změnit zobrazení.');
-                event.target.checked = !event.target.checked;
+                characterButton.setAttribute('aria-pressed', String(wasSelected));
+                characterButton.classList.toggle('is-selected', wasSelected);
                 return;
             }
             void refreshProjectView(root, target.href, 'push', true);
             return;
         }
+    });
+    document.addEventListener('change', (event) => {
+        if (!(event.target instanceof HTMLInputElement) || !root.contains(event.target)) return;
         if (!event.target.matches('[data-paging-switch]')) return;
-        if (activeCaptureCard || hasActiveLinePlayback()) {
+        if (activeCaptureCard) {
             setProjectStatus(root, activeCaptureCard
                 ? 'Nejdřív dokončete nebo uložte rozpracovanou nahrávku.'
                 : 'Po skončení přehrávání můžete změnit zobrazení.');
             event.target.checked = !event.target.checked;
             return;
         }
-        const target = new URL(window.location.href);
+        const target = new URL(
+            root.dataset.pendingNavigationUrl || window.location.href
+        );
         target.searchParams.set('paging', event.target.checked ? 'on' : 'off');
         target.searchParams.delete('page');
         void refreshProjectView(root, target.href, 'push', true);
@@ -1735,7 +1827,21 @@ function bindProjectLive(root) {
         if (!activeCaptureCard && !hasActiveLinePlayback()) {
             delete root.dataset.refreshDeferred;
         }
-        void refreshProjectView(root, window.location.href, 'none', true);
+        const queued = queuedProjectRefreshes.get(root);
+        if (queued) {
+            queuedProjectRefreshes.delete(root);
+            void refreshProjectView(
+                root, queued.url, queued.historyMode, queued.force
+            );
+            return;
+        }
+        void refreshProjectView(
+            root,
+            root.dataset.pendingNavigationUrl || root.dataset.lastUrl
+                || window.location.href,
+            'none',
+            true
+        );
     });
 
     let pollTimer = null;

@@ -179,9 +179,9 @@ final class StudioModel
      * @param int $requestedPage One-based visible script page.
      * @param bool $isAdmin Whether the authenticated user has global administrator access.
      * @param bool $myTakesOnly Whether to page roles assigned to the viewer.
-     * @param list<string> $characters Exact role names selected by an administrator.
+     * @param list<string> $characters Exact role names selected by an authorized viewer.
      * @param bool $paginate Whether to limit rendered lines to one page.
-     * @return array{project:array{id:int,title:string,role:string},chapters:list<array{id:int,title:string,lines:list<array{id:int,number:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,assigned_name:?string,can_record:bool,takes:list<array{id:int,attempt_no:int,media_type:string,user_id:?int,user_name:string,created_at:string,is_selected:bool,hidden:bool,can_hide:bool,can_delete:bool}>}>}>,members:list<array{id:int,name:string,is_active:bool,role:string}>,voices:list<array{character:string,assigned_user_id:?int,assigned_name:?string,assigned_users:list<int>}>,playlist:list<array{recording_id:int,line_number:int,character:string,chapter_title:string,attempt_no:int,media_type:string}>,pagination:array{enabled:bool,page:int,pages:int,total:int},has_recordings:bool,revision:string}|null
+     * @return array{project:array{id:int,title:string,role:string},chapters:list<array{id:int,title:string,lines:list<array{id:int,number:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,assigned_name:?string,can_record:bool,takes:list<array{id:int,attempt_no:int,media_type:string,user_id:?int,user_name:string,created_at:string,is_selected:bool,hidden:bool,can_hide:bool,can_delete:bool}>}>}>,members:list<array{id:int,name:string,is_active:bool,role:string}>,voices:list<array{character:string,assigned_user_id:?int,assigned_name:?string,assigned_users:list<int>,assigned_names:list<string>,line_count:int,dubbed_count:int}>,playlist:list<array{recording_id:int,line_id:int,line_number:int,line_page:int,in_filter:bool,character:string,chapter_title:string,attempt_no:int,media_type:string}>,pagination:array{enabled:bool,page:int,pages:int,total:int},has_recordings:bool,revision:string}|null
      *     Ordered page and playback data, or null when access is not allowed.
      */
     public function projectView(
@@ -221,17 +221,15 @@ final class StudioModel
         }
 
         $characterFilter = [];
-        if ($isAdmin) {
-            $selectedCharacters = array_values(array_filter(
-                $characters,
-                static fn (mixed $character): bool => is_string($character)
-            ));
-            foreach (array_values(array_unique($selectedCharacters, SORT_STRING)) as $index => $character) {
-                if (!is_string($character)) {
-                    continue;
-                }
-                $characterFilter['character_' . $index] = $character;
+        $selectedCharacters = array_values(array_filter(
+            $characters,
+            static fn (mixed $character): bool => is_string($character)
+        ));
+        foreach (array_values(array_unique($selectedCharacters, SORT_STRING)) as $index => $character) {
+            if (!is_string($character)) {
+                continue;
             }
+            $characterFilter['character_' . $index] = $character;
         }
         $characterFilterSql = '';
         if ($characterFilter !== []) {
@@ -400,6 +398,7 @@ final class StudioModel
         );
         $assignmentQuery->execute([$projectId]);
         $assignments = [];
+        $assignmentUserSets = [];
         $assignmentRows = [];
         foreach ($assignmentQuery->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $characterName = (string) $row['character_name'];
@@ -413,6 +412,7 @@ final class StudioModel
             ];
             $key = bin2hex($characterName);
             $assignments[$key] ??= [];
+            $assignmentUserSets[$key][$assignedUserId] = true;
             $assignments[$key][] = [
                 'assigned_user_id' => $assignedUserId,
                 'assigned_name' => is_string($row['assigned_name'])
@@ -428,13 +428,30 @@ final class StudioModel
         );
         $rolesQuery->execute([$projectId]);
         $lineNumbers = [];
+        $linePages = [];
+        $lineFilterMembership = [];
         $voicesByName = [];
         $lineNumber = 0;
+        $filteredLineNumber = 0;
         foreach ($rolesQuery->fetchAll(PDO::FETCH_ASSOC) as $row) {
             ++$lineNumber;
-            $lineNumbers[(string) $row['id']] = $lineNumber;
+            $lineId = (string) $row['id'];
+            $lineNumbers[$lineId] = $lineNumber;
             $character = (string) $row['character_name'];
             $voiceKey = bin2hex($character);
+            $matchesOwnRoles = !$myTakesOnly
+                || isset($assignmentUserSets[$voiceKey][$userId]);
+            $matchesCharacterFilter = $characterFilter === []
+                || in_array($character, array_values($characterFilter), true);
+            $inFilter = $matchesOwnRoles && $matchesCharacterFilter;
+            if ($inFilter) {
+                ++$filteredLineNumber;
+            }
+            $lineFilterMembership[$lineId] = $inFilter;
+            $pageOrdinal = $inFilter ? $filteredLineNumber : $lineNumber;
+            $linePages[$lineId] = !$paginate ? 1 : (int) ceil(
+                $pageOrdinal / self::PROJECT_PAGE_SIZE
+            );
             $assignment = $assignments[$voiceKey][0] ?? [
                 'assigned_user_id' => null, 'assigned_name' => null,
             ];
@@ -446,7 +463,14 @@ final class StudioModel
                     static fn (array $assigned): int => $assigned['assigned_user_id'],
                     $assignments[$voiceKey] ?? []
                 ),
+                'assigned_names' => array_map(
+                    static fn (array $assigned): string => $assigned['assigned_name'],
+                    $assignments[$voiceKey] ?? []
+                ),
+                'line_count' => 0,
+                'dubbed_count' => 0,
             ];
+            ++$voicesByName[$voiceKey]['line_count'];
         }
 
         foreach ($chapters as &$chapter) {
@@ -477,9 +501,16 @@ final class StudioModel
         $playlistQuery->execute([$projectId]);
         $playlist = [];
         foreach ($playlistQuery->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $voiceKey = bin2hex((string) $row['character_name']);
+            if (isset($voicesByName[$voiceKey])) {
+                ++$voicesByName[$voiceKey]['dubbed_count'];
+            }
             $playlist[] = [
                 'recording_id' => (int) $row['recording_id'],
+                'line_id' => (int) $row['line_id'],
                 'line_number' => $lineNumbers[(string) $row['line_id']],
+                'line_page' => $linePages[(string) $row['line_id']],
+                'in_filter' => $lineFilterMembership[(string) $row['line_id']],
                 'character' => (string) $row['character_name'],
                 'chapter_title' => (string) $row['chapter_title'],
                 'attempt_no' => (int) $row['attempt_no'],

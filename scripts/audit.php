@@ -470,7 +470,8 @@ function auditLegacyUpgrade(string $host, int $port, string $rootPassword): void
         );
         $database->exec(
             "INSERT INTO dabing_script_lines (id,chapter_id,position,character_name,text) "
-            . "VALUES (61,51,1,'Rook','Keep the gate.')"
+            . "VALUES (61,51,1,'Rook','Keep the gate.'), "
+            . "(62,51,2,'Scout','I see the road.')"
         );
         $database->exec(
             "INSERT INTO dabing_recordings "
@@ -543,6 +544,24 @@ function auditLegacyUpgrade(string $host, int $port, string $rootPassword): void
         $adminView = $studio->projectView(42, 2, 1, true, false, [], false);
         $assert(is_array($ownerView) && is_array($peerView)
             && is_array($adminView), 'A project view was unavailable to an expected viewer.');
+        $filteredPeerView = $studio->projectView(
+            42, 2, 1, false, false, ['Scout'], false
+        );
+        $assert(is_array($filteredPeerView)
+            && $filteredPeerView['pagination']['total'] === 1
+            && $filteredPeerView['chapters'][0]['lines'][0]['character'] === 'Scout'
+            && !$filteredPeerView['chapters'][0]['lines'][0]['can_record']
+            && $peerView['chapters'][0]['lines'][0]['can_record'],
+            'Collaborator character filter altered role-specific recording rights.');
+        $rookVoice = array_values(array_filter(
+            $adminView['voices'],
+            static fn (array $voice): bool => $voice['character'] === 'Rook'
+        ));
+        $assert(count($rookVoice) === 1
+            && $rookVoice[0]['line_count'] === 1
+            && $rookVoice[0]['dubbed_count'] === 1
+            && $rookVoice[0]['assigned_names'] === ['Owner', 'Voice'],
+            'Voice summary did not count one line/selected take or both assignees.');
         $ownerTakes = $ownerView['chapters'][0]['lines'][0]['takes'];
         $peerTakes = $peerView['chapters'][0]['lines'][0]['takes'];
         $adminTakes = $adminView['chapters'][0]['lines'][0]['takes'];

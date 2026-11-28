@@ -147,11 +147,15 @@ Pokus může trvale odstranit pouze správce. Při odstranění vybraného pokus
 se vybere nejnižší zbývající číslo. Číslování již uložených pokusů zůstává;
 nový pokus dostane číslo za nejvyšším dosavadním.
 
-Správce může filtrovat knihu podle několika postav najednou. Bez vybraných
-postav se zobrazí všechny repliky. Stránkování je ve výchozím nastavení
+Správce i spolupracovník s přístupem ke knize mohou filtrovat podle několika
+postav najednou. Bez vybraných postav se zobrazí všechny repliky. Filtr nemění
+právo k nahrávání; spolupracovník může nahrávat pouze přiřazené role.
+Stránkování je ve výchozím nastavení
 vypnuté; jeho volba se ukládá pro knihu, účet a prohlížeč. Dabing průběžně
 obnovuje zobrazení při nahrání pokusu, změně vybraného záběru nebo jeho skrytí
 a při změně obsazení. Text scénáře se živě neobnovuje.
+Filtr řadí postavy abecedně. U každé ukazuje přiřazená jména, počet replik
+a počet nadabovaných replik s platným vybraným pokusem.
 
 Při mazání se soubor nejprve přesune do neveřejného adresáře
 `storage/recordings/pending`. Pokud databázová transakce skončí chybou, soubor
@@ -163,6 +167,8 @@ neodkazuje.
 
 První záběr se použije automaticky a správce může vybrat jiný. Poslech
 přehraje vybrané repliky ve scénářovém pořadí a přeskočí prázdná místa.
+Šipka u položky spustí přehrávání. Kliknutí na její číslo nebo postavu přejde
+k replice a při zapnutém stránkování otevře správnou stránku bez spuštění zvuku.
 Při nahrávání bliká REC a ukazatel reaguje na úroveň mikrofonu. Po stisknutí
 Stop se záznam v prohlížeči rovnou převede na MP3 a uloží. Stejně se zpracuje
 vybraný zvukový soubor. Po chybě zůstane zvuk v otevřené kartě pro další

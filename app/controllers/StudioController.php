@@ -122,12 +122,9 @@ final class StudioController
             }
             Http::json(['ok' => true, 'revision' => $revision]);
         }
-        if (Http::query('filter') === 'characters' && !$isAdmin) {
-            throw new HttpError(403, 'Výběr postav je dostupný pouze správcům.');
-        }
         $characters = [];
         $filter = Http::query('filter');
-        if ($isAdmin && $filter === 'characters') {
+        if ($filter === 'characters') {
             if ($this->model->projectRevision(
                 $projectId, $this->userId(), $isAdmin
             ) === null) {
@@ -162,6 +159,22 @@ final class StudioController
         if ($view === null) {
             throw new HttpError(404, 'Kniha nebyla nalezena.');
         }
+        $filterVoices = $view['voices'];
+        $collator = class_exists(\Collator::class)
+            ? new \Collator('cs_CZ') : null;
+        usort($filterVoices, static function (array $left, array $right) use (
+            $collator
+        ): int {
+            $leftName = $left['character'];
+            $rightName = $right['character'];
+            $comparison = $collator?->compare($leftName, $rightName);
+            if (!is_int($comparison) || $comparison === 0) {
+                $comparison = strnatcasecmp($leftName, $rightName);
+            }
+            return $comparison === 0
+                ? strcmp($leftName, $rightName) : $comparison;
+        });
+        $view['filter_voices'] = $filterVoices;
         foreach ($view['chapters'] as &$chapter) {
             foreach ($chapter['lines'] as &$line) {
                 foreach ($line['takes'] as &$take) {

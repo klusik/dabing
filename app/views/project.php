@@ -15,8 +15,15 @@ use Dabing\Http;
 $project = is_array($data['project'] ?? null) ? $data['project'] : [];
 $chapters = is_array($data['chapters'] ?? null) ? $data['chapters'] : [];
 $members = is_array($data['members'] ?? null) ? $data['members'] : [];
+$memberNamesById = [];
+foreach ($members as $member) {
+    $memberNamesById[(int) $member['id']] = (string) $member['name'];
+}
 $canInvite = (bool) ($data['can_invite'] ?? false);
 $voices = is_array($data['voices'] ?? null) ? $data['voices'] : [];
+$filterVoices = is_array($data['filter_voices'] ?? null)
+    ? $data['filter_voices']
+    : $voices;
 $pagination = is_array($data['pagination'] ?? null) ? $data['pagination'] : ['page' => 1, 'pages' => 1, 'total' => 0];
 $playlist = is_array($data['playlist'] ?? null) ? $data['playlist'] : [];
 $exportUrl = (string) ($data['export_url']
@@ -141,21 +148,35 @@ if ($filter === 'characters') {
     <nav class="script-filter" aria-label="Filtr replik">
         <a class="<?= $filter === 'all' ? 'is-current' : '' ?>" data-project-nav href="<?= Http::escape($allFilterUrl) ?>"<?= $filter === 'all' ? ' aria-current="page"' : '' ?>>Všechny</a>
         <a class="<?= $filter === 'mine' ? 'is-current' : '' ?>" data-project-nav href="<?= Http::escape($mineFilterUrl) ?>"<?= $filter === 'mine' ? ' aria-current="page"' : '' ?>>Moje repliky</a>
-        <?php if ($isAdmin): ?>
+        <?php if ($filterVoices !== []): ?>
             <div class="anchored-control character-filter-control">
                 <button class="script-filter-trigger<?= $filter === 'characters' ? ' is-current' : '' ?>" type="button" data-panel-trigger="character-filter-panel" aria-controls="character-filter-panel" aria-expanded="false" title="Filtrovat podle postavy">Postavy<?= $filter === 'characters' ? ' · ' . count($characters) : '' ?></button>
                 <div class="popover character-filter-popover" id="character-filter-panel" data-panel hidden>
-                    <h2>Filtrovat postavy</h2>
-                    <fieldset class="character-filter-list">
-                        <legend>Vyberte jednu nebo více postav. Bez výběru se zobrazí všechny repliky.</legend>
-                        <?php foreach ($voices as $voice): ?>
-                            <?php $characterName = (string) $voice['character']; ?>
-                            <label class="character-filter-option">
-                                <input type="checkbox" data-character-filter value="<?= Http::escape($characterName) ?>"<?= in_array($characterName, $characters, true) ? ' checked' : '' ?>>
-                                <span><?= Http::escape($characterName) ?></span>
-                            </label>
-                        <?php endforeach; ?>
-                    </fieldset>
+                    <div class="character-filter-cells" role="group" aria-label="Postavy knihy">
+                <?php foreach ($filterVoices as $voice): ?>
+                    <?php $characterName = (string) $voice['character']; ?>
+                    <?php
+                    $assignedNames = is_array($voice['assigned_names'] ?? null)
+                        ? $voice['assigned_names']
+                        : array_values(array_filter(array_map(
+                        static fn (int $userId): ?string => $memberNamesById[$userId] ?? null,
+                        $voice['assigned_users'] ?? []
+                        )));
+                    $assignedSummary = implode(', ', $assignedNames);
+                    $isCharacterSelected = in_array($characterName, $characters, true);
+                    $lineCount = (int) ($voice['line_count'] ?? 0);
+                    $dubbedCount = (int) ($voice['dubbed_count'] ?? 0);
+                    $missingCount = max(0, $lineCount - $dubbedCount);
+                    ?>
+                    <button class="character-filter-cell<?= $isCharacterSelected ? ' is-selected' : '' ?>" type="button" data-character-filter value="<?= Http::escape($characterName) ?>" aria-pressed="<?= $isCharacterSelected ? 'true' : 'false' ?>" title="<?= Http::escape($characterName . ($assignedSummary !== '' ? ' · ' . $assignedSummary : '')) ?>">
+                        <span class="character-filter-name"><?= Http::escape($characterName) ?></span>
+                        <span class="character-filter-assignees"<?= $assignedSummary === '' ? ' aria-hidden="true"' : '' ?>><?= Http::escape($assignedSummary) ?></span>
+                        <span class="character-filter-count" aria-label="Replik celkem <?= $lineCount ?>" title="Replik celkem: <?= $lineCount ?>"><span aria-hidden="true">▤</span><?= $lineCount ?></span>
+                        <span class="character-filter-count" aria-label="Nadabováno <?= $dubbedCount ?>" title="Nadabováno: <?= $dubbedCount ?>"><span aria-hidden="true">♫</span><?= $dubbedCount ?></span>
+                        <span class="character-filter-count" aria-label="Chybí <?= $missingCount ?>" title="Chybí: <?= $missingCount ?>"><span class="character-filter-missing-icon" aria-hidden="true">♫</span><?= $missingCount ?></span>
+                    </button>
+                <?php endforeach; ?>
+                    </div>
                 </div>
             </div>
         <?php endif; ?>
@@ -308,7 +329,8 @@ if ($filter === 'characters') {
             <?php else: ?>
                 <?php foreach ($playlist as $clip): ?>
                     <div class="playlist-line">
-                        <button type="button" class="playlist-play" data-play-item data-recording-id="<?= Http::escape((string) $clip['recording_id']) ?>" aria-label="Přehrát repliku <?= sprintf('%04d', (int) $clip['line_number']) ?> — <?= Http::escape((string) $clip['character']) ?>" title="<?= Http::escape((string) $clip['file_name']) ?>" data-src="<?= Http::escape((string) $clip['audio_url']) ?>" data-label="<?= Http::escape((string) $clip['character']) ?> — <?= Http::escape((string) $clip['chapter_title']) ?>"><span aria-hidden="true">▶</span><span><?= sprintf('%04d', (int) $clip['line_number']) ?> · <?= Http::escape((string) $clip['character']) ?></span></button>
+                        <button type="button" class="playlist-play" data-play-item data-recording-id="<?= Http::escape((string) $clip['recording_id']) ?>" aria-label="Přehrát repliku <?= sprintf('%04d', (int) $clip['line_number']) ?> — <?= Http::escape((string) $clip['character']) ?>" title="Přehrát · <?= Http::escape((string) $clip['file_name']) ?>" data-src="<?= Http::escape((string) $clip['audio_url']) ?>" data-label="<?= Http::escape((string) $clip['character']) ?> — <?= Http::escape((string) $clip['chapter_title']) ?>"><span aria-hidden="true">▶</span></button>
+                        <button type="button" class="playlist-jump" data-play-jump data-play-line-id="<?= Http::escape((string) $clip['line_id']) ?>" data-play-line-page="<?= Http::escape((string) $clip['line_page']) ?>" data-play-in-filter="<?= !empty($clip['in_filter']) ? '1' : '0' ?>" aria-label="Přejít na repliku <?= sprintf('%04d', (int) $clip['line_number']) ?> — <?= Http::escape((string) $clip['character']) ?>" title="Přejít na repliku <?= sprintf('%04d', (int) $clip['line_number']) ?>"><?= sprintf('%04d', (int) $clip['line_number']) ?> · <?= Http::escape((string) $clip['character']) ?></button>
                     </div>
                 <?php endforeach; ?>
             <?php endif; ?>
