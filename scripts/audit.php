@@ -134,6 +134,7 @@ function auditMailTransport(): void
     $capturePath = $directory . DIRECTORY_SEPARATOR . 'messages.txt';
     $captureCommand = $directory . DIRECTORY_SEPARATOR . 'capture.sh';
     $configuredStorage = $directory . DIRECTORY_SEPARATOR . 'configured';
+    $stage = 'prepare isolated capture';
     try {
         if (!mkdir($configuredStorage, 0700)) {
             throw new RuntimeException('Configured mail fixture directory failed.');
@@ -141,7 +142,7 @@ function auditMailTransport(): void
         $captureScript = "#!/bin/sh\n"
             . 'printf "\\n--DABING-ARGS-BEGIN--\\n" >> '
             . escapeshellarg($capturePath) . "\n"
-            . 'for argument do printf "<%s>\\n" "$argument" >> '
+            . 'printf "<%s>\\n" "$@" >> '
             . escapeshellarg($capturePath) . "\n"
             . 'printf "%s\\n" "--DABING-MESSAGE-BEGIN--" >> '
             . escapeshellarg($capturePath) . "\n"
@@ -193,6 +194,7 @@ function auditMailTransport(): void
             . '"ffeeddccbbaa00998877665544332211", [],'
             . '"28. 11. 2026 12:00 Europe/Prague", $invalidAdmin)) { exit(26); }';
         $sendmailPath = '/bin/sh ' . escapeshellarg($captureCommand) . ' -t -i';
+        $stage = 'run PHP mail fixtures';
         $result = runCommand([
             PHP_BINARY,
             '-d',
@@ -201,12 +203,16 @@ function auditMailTransport(): void
             $childCode,
         ]);
         if ($result['status'] !== 0) {
-            throw new RuntimeException('Native mail capture subprocess failed.');
+            $stage = 'run PHP mail fixtures (exit code '
+                . $result['status'] . ')';
+            throw new RuntimeException('PHP fixture subprocess failed.');
         }
+        $stage = 'read sendmail capture';
         $capture = file_get_contents($capturePath);
         if (!is_string($capture)) {
             throw new RuntimeException('Native mail capture was not created.');
         }
+        $stage = 'parse captured messages';
         $matchCount = preg_match_all(
             '/--DABING-ARGS-BEGIN--\r?\n((?:<[^>\r\n]*>\r?\n)*)'
             . '--DABING-MESSAGE-BEGIN--\r?\n(.*?)\r?\n--DABING-END--/s',
@@ -217,6 +223,7 @@ function auditMailTransport(): void
         if ($matchCount !== 5) {
             throw new RuntimeException('Native mail capture did not contain five messages.');
         }
+        $stage = 'validate sender and message assertions';
         $messages = [];
         $argumentsByMessage = [];
         foreach ($matches as $match) {
@@ -255,6 +262,7 @@ function auditMailTransport(): void
             null,
         ];
         foreach ($messages as $index => $message) {
+            $stage = 'validate message ' . ($index + 1) . ' sender and arguments';
             $from = $headerValue($message, 'From');
             $replyTo = $headerValue($message, 'Reply-To');
             $expectedArguments = $expectedEnvelope[$index] === null
@@ -277,24 +285,32 @@ function auditMailTransport(): void
                 );
             }
         }
-        if (!str_contains($messages[0], 'invite@dabing.test')
-            || !str_contains($messages[0], 'route=email-join')
-            || !str_contains($messages[0], '0123456789abcdef0123456789abcdef')
-            || !str_contains($messages[1], 'voice@dabing.test')
-            || !str_contains($messages[1], 'route=project&id=73')
-            || !str_contains($messages[1], 'Rook')
-            || !str_contains($messages[1], 'Guard')
-            || !str_contains($messages[2], 'external@dabing.test')
-            || !str_contains($messages[2], 'route=email-join')
-            || !str_contains($messages[3], 'configured@dabing.test')
-            || !str_contains($messages[3], 'route=project&id=74')
-            || !str_contains($messages[3], 'Pilot')
-            || !str_contains($messages[4], 'invalid-admin@dabing.test')) {
-            throw new RuntimeException('Captured mail routing or content was incorrect.');
+        $expectedContent = [
+            ['invite@dabing.test', 'route=email-join',
+                '0123456789abcdef0123456789abcdef'],
+            ['voice@dabing.test', 'route=project&id=73', 'Rook', 'Guard'],
+            ['external@dabing.test', 'route=email-join'],
+            ['configured@dabing.test', 'route=project&id=74', 'Pilot'],
+            ['invalid-admin@dabing.test'],
+        ];
+        foreach ($expectedContent as $index => $needles) {
+            $stage = 'validate message ' . ($index + 1) . ' route and content';
+            foreach ($needles as $needle) {
+                if (!str_contains($messages[$index], $needle)) {
+                    throw new RuntimeException('Captured message content mismatch.');
+                }
+            }
         }
         fwrite(STDOUT,
             "PASS native mail fallback: default, external, configured, and invalid "
             . "admin sender cases preserve MIME and routing.\n"
+        );
+    } catch (Throwable $error) {
+        throw new RuntimeException(
+            'Native mail audit failed during ' . $stage . ' ('
+            . get_class($error) . ').',
+            0,
+            $error
         );
     } finally {
         foreach ([
@@ -628,7 +644,11 @@ function auditSchema(): void
 try {
     $files = trackedFiles();
     auditSources($files);
-    auditMailTransport();
+    try {
+        auditMailTransport();
+    } catch (RuntimeException $error) {
+        fail($error->getMessage());
+    }
     auditSchema();
 } catch (Throwable $error) {
     fail('Audit could not complete (' . get_class($error) . ').');
