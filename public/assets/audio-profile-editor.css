@@ -114,6 +114,7 @@ body.audio-profile-embedded .profile-head { position:absolute; width:1px; height
 .profile-save { margin-top:9px; margin-bottom:0; }
 .profile-save input:not([type]) { min-width:150px; flex:1; }
 .profile-save-button { margin-left:auto; border-color:var(--forest); background:var(--forest); color:#fff; }
+.profile-toolbar .profile-save-button { margin-left:0; }
 @media(max-width:760px) {
     .monitor-strip { grid-template-columns:1fr 1fr; }
     .monitor-controls,.editor-status { grid-column:1/-1; }
@@ -122,14 +123,15 @@ body.audio-profile-embedded .profile-head { position:absolute; width:1px; height
 @media(max-width:600px) {
     .profile-editor { box-sizing: border-box; width: 100%; }
 
-    .profile-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:6px; padding:7px; }
+    .profile-toolbar { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:6px; padding:7px; }
     .profile-select-label { grid-column:1; min-width:0; font-size:0; }
     .profile-select-label select { width:100%; min-width:0; flex:1; font-size:12px; }
     .profile-toolbar-spacer { display:none; }
     .profile-toolbar [data-new-profile] { grid-column:2; grid-row:1; }
     .profile-toolbar [data-rename-profile] { grid-column:3; grid-row:1; }
     .profile-toolbar .file-button { grid-column:1; grid-row:2; justify-self:start; }
-    .profile-file-name { grid-column:2/4; grid-row:2; min-width:0; max-width:100%; justify-self:stretch; }
+    .profile-file-name { grid-column:2; grid-row:2; min-width:0; max-width:100%; justify-self:stretch; }
+    .profile-toolbar .profile-save-button { grid-column:3; grid-row:2; justify-self:end; }
     .mixer-grid { grid-template-columns:1fr; }
     .chain-hint { display:none; }
     .detail-channel { padding:9px 7px; }

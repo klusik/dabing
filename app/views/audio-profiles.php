@@ -62,6 +62,8 @@ $chainJson = json_encode($chain, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | J
             <input type="file" accept="audio/*" data-local-audio aria-label="Načíst zvukový soubor">
         </label>
         <span class="profile-file-name" data-file-name><?= Http::escape((string) ($sample['label'] ?? 'Bez ukázky')) ?></span>
+        <button class="profile-button profile-save-button" type="submit"
+            form="profile-save-form" data-save-profile>Uložit profil</button>
     </div>
     <div class="mixer-grid">
         <section class="mixer-channel chain-channel" aria-label="Řetězec efektů">
@@ -93,7 +95,7 @@ $chainJson = json_encode($chain, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | J
         <audio controls preload="none" data-preview-player aria-label="Přehrávač ukázky"></audio>
         <p class="editor-status" data-editor-status aria-live="polite">Vyberte soubor nebo ukázku uložené nahrávky.</p>
     </section>
-    <form class="profile-save" method="post" action="<?= Http::escape(Http::url('audio-profiles')) ?>">
+    <form id="profile-save-form" class="profile-save" method="post" action="<?= Http::escape(Http::url('audio-profiles')) ?>">
         <?php if (is_string($data['form_error'] ?? null) && $data['form_error'] !== ''): ?><p class="profile-form-error" role="alert"><?= Http::escape($data['form_error']) ?></p><?php endif; ?>
         <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
         <input type="hidden" name="action" value="save">
