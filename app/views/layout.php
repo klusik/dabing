@@ -25,15 +25,15 @@ use Dabing\Http;
         <link rel="stylesheet" href="<?= Http::escape(Http::asset('users.css')) ?>">
     <?php endif; ?>
     <?php if (($view ?? '') === 'audio-profiles'): ?>
-        <link rel="stylesheet" href="./public/assets/audio-profiles/audio-profile-editor.css">
+        <link rel="stylesheet" href="<?= Http::escape(Http::asset('audio-profiles/audio-profile-editor.css')) ?>">
     <?php elseif (($view ?? '') === 'project'): ?>
-        <link rel="stylesheet" href="./public/assets/studio-audio-profiles.css">
+        <link rel="stylesheet" href="<?= Http::escape(Http::asset('studio-audio-profiles.css')) ?>">
     <?php endif; ?>
     <script src="<?= Http::escape(Http::asset('site.js')) ?>" defer></script>
     <?php if (($view ?? '') === 'audio-profiles'): ?>
-        <script type="module" src="./public/assets/audio-profiles/audio-profile-editor.js"></script>
+        <script type="module" src="<?= Http::escape(Http::asset('audio-profiles/audio-profile-editor.js')) ?>"></script>
     <?php elseif (($view ?? '') === 'project'): ?>
-        <script type="module" src="./public/assets/studio-audio-profiles.js"></script>
+        <script type="module" src="<?= Http::escape(Http::asset('studio-audio-profiles.js')) ?>"></script>
     <?php endif; ?>
 </head>
 <body>

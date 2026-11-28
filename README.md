@@ -61,6 +61,11 @@ postavy a hlasu. Přiřazení repliky platí i pro budoucí pokusy. Globální e
 otevřete ikonou noty v navigaci správce. V něm lze přehrát vzorovou nahrávku
 z projektu nebo místní zvukový soubor.
 
+Každý vybraný efekt má vlastní graf a ovládací prvky. Graf při přehrávání
+ukazuje naměřený signál před a po daném kroku: u EQ spektrum, u ostatních
+efektů úroveň v čase. Číselné hodnoty lze zadávat s čárkou i tečkou; změny se
+uplatní při dalším spuštění „Poslech efektů“.
+
 Zvukové profily jsou globální a spravuje je administrátor. Nastavení se
 zobrazí pouze uživateli s přístupem do příslušného projektu. Hlasové a
 hlasová, řádková i jednotlivá přiřazení se nastavují v projektovém studiu.
