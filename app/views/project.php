@@ -23,7 +23,40 @@ $exportUrl = (string) ($data['export_url']
     ?? Http::url('export-book', ['id' => (int) ($project['id'] ?? 0)]));
 $hasRecordings = (bool) ($data['has_recordings'] ?? false);
 $filter = (string) ($data['filter'] ?? 'all');
+$isAdmin = !empty($data['is_admin']);
+$characters = is_array($data['characters'] ?? null) ? $data['characters'] : [];
+$pagingEnabled = !empty($pagination['enabled']);
+$pagingValue = $pagingEnabled ? 'on' : 'off';
+$projectId = (int) ($project['id'] ?? 0);
+$accountId = (int) ($user['id'] ?? 0);
+$allFilterUrl = Http::url('project', [
+    'id' => $projectId, 'filter' => 'all', 'paging' => $pagingValue,
+]);
+$mineFilterUrl = Http::url('project', [
+    'id' => $projectId, 'filter' => 'mine', 'paging' => $pagingValue,
+]);
+$previousUrl = Http::url('project', [
+    'id' => $projectId, 'filter' => $filter, 'paging' => $pagingValue,
+    'page' => max(1, (int) ($pagination['page'] ?? 1) - 1),
+]);
+$nextUrl = Http::url('project', [
+    'id' => $projectId, 'filter' => $filter, 'paging' => $pagingValue,
+    'page' => (int) ($pagination['page'] ?? 1) + 1,
+]);
+if ($filter === 'characters') {
+    foreach ($characters as $character) {
+        $previousUrl .= '&characters%5B%5D=' . rawurlencode((string) $character);
+        $nextUrl .= '&characters%5B%5D=' . rawurlencode((string) $character);
+    }
+}
 ?>
+<div
+    data-project-live
+    data-project-id="<?= Http::escape((string) $projectId) ?>"
+    data-account-id="<?= Http::escape((string) $accountId) ?>"
+    data-revision="<?= Http::escape((string) ($data['revision'] ?? '')) ?>"
+    data-paging-enabled="<?= $pagingEnabled ? 'on' : 'off' ?>"
+>
 <section class="workspace-heading">
     <div class="workspace-title"><a class="back-link" href="<?= Http::escape(Http::url('projects')) ?>" title="Moje knihy" aria-label="Zpět na moje knihy">←<span class="sr-only">Zpět na moje knihy</span></a><h1><?= Http::escape((string) ($project['title'] ?? 'Audiokniha')) ?></h1></div>
     <div class="workspace-actions">
@@ -33,6 +66,7 @@ $filter = (string) ($data['filter'] ?? 'all');
                 <div class="popover invite-popover" id="invite-panel" data-panel hidden>
                     <h2>Pozvat spolupracovníka</h2>
                     <?php require __DIR__ . '/project-invitations.php'; ?>
+                    <p class="project-action-status" data-panel-status aria-live="polite"></p>
                 </div>
             </div>
             <div class="anchored-control">
@@ -83,7 +117,7 @@ $filter = (string) ($data['filter'] ?? 'all');
                 </div>
             </div>
         <?php endif; ?>
-        <div class="member-stack" aria-label="Členové projektu"><?php foreach (array_slice($members, 0, 4) as $member): ?><span class="member-avatar" title="<?= Http::escape((string) $member['name']) ?>"><?= Http::escape((preg_match('/\\A./us', (string) $member['name'], $initial) === 1 ? strtoupper($initial[0]) : 'D')) ?></span><?php endforeach; ?><span class="member-count"><?= count($members) ?> <?= count($members) === 1 ? 'hlas' : (count($members) >= 2 && count($members) < 5 ? 'hlasy' : 'hlasů') ?></span></div>
+        <div class="member-stack" data-project-members aria-label="Členové projektu"><?php foreach (array_slice($members, 0, 4) as $member): ?><span class="member-avatar" title="<?= Http::escape((string) $member['name']) ?>"><?= Http::escape((preg_match('/\\A./us', (string) $member['name'], $initial) === 1 ? strtoupper($initial[0]) : 'D')) ?></span><?php endforeach; ?><span class="member-count"><?= count($members) ?> <?= count($members) === 1 ? 'hlas' : (count($members) >= 2 && count($members) < 5 ? 'hlasy' : 'hlasů') ?></span></div>
     </div>
 </section>
 <section
@@ -105,10 +139,33 @@ $filter = (string) ($data['filter'] ?? 'all');
         </span>
     </div>
     <nav class="script-filter" aria-label="Filtr replik">
-        <a class="<?= $filter === 'all' ? 'is-current' : '' ?>" href="<?= Http::escape(Http::url('project', ['id' => $project['id'], 'filter' => 'all'])) ?>"<?= $filter === 'all' ? ' aria-current="page"' : '' ?>>Všechny</a>
-        <a class="<?= $filter === 'mine' ? 'is-current' : '' ?>" href="<?= Http::escape(Http::url('project', ['id' => $project['id'], 'filter' => 'mine'])) ?>"<?= $filter === 'mine' ? ' aria-current="page"' : '' ?>>Moje repliky</a>
+        <a class="<?= $filter === 'all' ? 'is-current' : '' ?>" data-project-nav href="<?= Http::escape($allFilterUrl) ?>"<?= $filter === 'all' ? ' aria-current="page"' : '' ?>>Všechny</a>
+        <a class="<?= $filter === 'mine' ? 'is-current' : '' ?>" data-project-nav href="<?= Http::escape($mineFilterUrl) ?>"<?= $filter === 'mine' ? ' aria-current="page"' : '' ?>>Moje repliky</a>
+        <?php if ($isAdmin): ?>
+            <div class="anchored-control character-filter-control">
+                <button class="script-filter-trigger<?= $filter === 'characters' ? ' is-current' : '' ?>" type="button" data-panel-trigger="character-filter-panel" aria-controls="character-filter-panel" aria-expanded="false" title="Filtrovat podle postavy">Postavy<?= $filter === 'characters' ? ' · ' . count($characters) : '' ?></button>
+                <div class="popover character-filter-popover" id="character-filter-panel" data-panel hidden>
+                    <h2>Filtrovat postavy</h2>
+                    <fieldset class="character-filter-list">
+                        <legend>Vyberte jednu nebo více postav. Bez výběru se zobrazí všechny repliky.</legend>
+                        <?php foreach ($voices as $voice): ?>
+                            <?php $characterName = (string) $voice['character']; ?>
+                            <label class="character-filter-option">
+                                <input type="checkbox" data-character-filter value="<?= Http::escape($characterName) ?>"<?= in_array($characterName, $characters, true) ? ' checked' : '' ?>>
+                                <span><?= Http::escape($characterName) ?></span>
+                            </label>
+                        <?php endforeach; ?>
+                    </fieldset>
+                </div>
+            </div>
+        <?php endif; ?>
     </nav>
     <div class="studio-toolbar-actions">
+        <label class="paging-toggle" title="Zobrazit scénář po stránkách">
+            <input type="checkbox" role="switch" data-paging-switch aria-label="Stránkování"<?= $pagingEnabled ? ' checked' : '' ?>>
+            <span class="paging-switch-track" aria-hidden="true"></span>
+            <span>Stránkování</span>
+        </label>
         <a
             class="icon-control"
             href="#poslech"
@@ -117,7 +174,7 @@ $filter = (string) ($data['filter'] ?? 'all');
         >
             <span aria-hidden="true">↓</span>
         </a>
-        <?php if ($hasRecordings && (!empty($data['is_admin']) || ($project['role'] ?? '') === 'owner')): ?>
+        <?php if ($hasRecordings && ($isAdmin || ($project['role'] ?? '') === 'owner')): ?>
             <a
                 class="icon-control zip-export-control"
                 href="<?= Http::escape($exportUrl) ?>"
@@ -128,17 +185,19 @@ $filter = (string) ($data['filter'] ?? 'all');
             </a>
         <?php endif; ?>
     </div>
+    <p class="project-action-status sr-only" data-project-status aria-live="polite"></p>
 </section>
+<div data-project-content>
 <?php if ((int) ($pagination['pages'] ?? 1) > 1): ?>
     <nav class="script-pagination" aria-label="Stránkování scénáře">
         <?php if ((int) ($pagination['page'] ?? 1) > 1): ?>
-            <a class="icon-control" href="<?= Http::escape(Http::url('project', ['id' => (string) $project['id'], 'page' => (int) $pagination['page'] - 1, 'filter' => $filter])) ?>" title="Předchozí stránka" aria-label="Předchozí stránka">←</a>
+            <a class="icon-control" data-project-nav href="<?= Http::escape($previousUrl) ?>" title="Předchozí stránka" aria-label="Předchozí stránka">←</a>
         <?php else: ?>
             <span class="icon-control is-disabled" aria-hidden="true">←</span>
         <?php endif; ?>
         <span>Strana <?= Http::escape((string) $pagination['page']) ?> / <?= Http::escape((string) $pagination['pages']) ?> · <?= Http::escape(number_format((int) $pagination['total'], 0, ',', ' ')) ?> replik</span>
         <?php if ((int) ($pagination['page'] ?? 1) < (int) ($pagination['pages'] ?? 1)): ?>
-            <a class="icon-control" href="<?= Http::escape(Http::url('project', ['id' => (string) $project['id'], 'page' => (int) $pagination['page'] + 1, 'filter' => $filter])) ?>" title="Další stránka" aria-label="Další stránka">→</a>
+            <a class="icon-control" data-project-nav href="<?= Http::escape($nextUrl) ?>" title="Další stránka" aria-label="Další stránka">→</a>
         <?php else: ?>
             <span class="icon-control is-disabled" aria-hidden="true">→</span>
         <?php endif; ?>
@@ -169,22 +228,33 @@ $filter = (string) ($data['filter'] ?? 'all');
                                             'download' => 1,
                                         ]));
                                     ?>
-                                    <div class="take-row<?= !empty($take['is_selected']) ? ' take-selected' : '' ?><?= !empty($take['can_delete']) ? ' take-row-has-delete' : '' ?>">
+                                    <?php $isHidden = !empty($take['hidden']); ?>
+                                    <div class="take-row<?= !empty($take['is_selected']) ? ' take-selected' : '' ?><?= !empty($take['can_delete']) ? ' take-row-has-delete' : '' ?><?= $isHidden ? ' take-hidden' : '' ?>" data-recording-id="<?= Http::escape((string) $take['id']) ?>">
                                         <div class="take-meta">
                                             <span class="attempt-badge" title="Číslo pokusu"><?= sprintf('%03d', $attemptNo) ?></span>
                                             <span class="take-name" title="<?= Http::escape((string) $take['user_name']) ?>">
                                                 <span class="take-byline"><?= Http::escape((string) $take['user_name']) ?><?= !empty($take['is_selected']) ? ' · vybráno' : '' ?></span>
+                                                <?php if ($isHidden): ?><span class="take-hidden-label" title="Tato nahrávka je skrytá">Skryto</span><?php endif; ?>
                                             </span>
                                         </div>
-                                        <audio preload="none" controls src="<?= Http::escape($audioUrl) ?>" aria-label="Přehrát pokus <?= sprintf('%03d', $attemptNo) ?> od <?= Http::escape((string) $take['user_name']) ?>"></audio>
+                                        <audio data-take-audio="<?= Http::escape((string) $take['id']) ?>" preload="none" controls src="<?= Http::escape($audioUrl) ?>" aria-label="Přehrát pokus <?= sprintf('%03d', $attemptNo) ?> od <?= Http::escape((string) $take['user_name']) ?>"></audio>
                                         <a class="icon-control take-download" href="<?= Http::escape($downloadUrl) ?>"<?= $fileName !== '' ? ' download="' . Http::escape($fileName) . '"' : '' ?> title="Stáhnout <?= Http::escape($fileName !== '' ? $fileName : 'nahrávku') ?>" aria-label="Stáhnout <?= Http::escape($fileName !== '' ? $fileName : 'nahrávku') ?>"><span aria-hidden="true">↓</span></a>
+                                        <?php if (!empty($take['can_hide']) || ($isAdmin && $isHidden)): ?>
+                                            <form method="post" action="<?= Http::escape(Http::url('hide-take', ['id' => (string) $project['id']])) ?>" class="take-hide-form" data-project-async>
+                                                <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
+                                                <input type="hidden" name="line_id" value="<?= Http::escape((string) $line['id']) ?>">
+                                                <input type="hidden" name="recording_id" value="<?= Http::escape((string) $take['id']) ?>">
+                                                <input type="hidden" name="hidden" value="<?= $isHidden ? '0' : '1' ?>">
+                                                <button class="icon-control take-hide-trigger" type="submit" title="<?= $isHidden ? 'Zobrazit nahrávku' : 'Skrýt nahrávku' ?>" aria-label="<?= $isHidden ? 'Zobrazit nahrávku' : 'Skrýt nahrávku' ?>"><span aria-hidden="true"><?= $isHidden ? '◉' : '⊘' ?></span></button>
+                                            </form>
+                                        <?php endif; ?>
                                         <?php if (!empty($take['can_delete'])): ?>
                                             <?php $deletePanelId = 'delete-take-' . (int) $take['id']; ?>
                                             <div class="anchored-control take-delete-control">
                                                         <button class="icon-control take-delete-trigger" type="button" data-panel-trigger="<?= Http::escape($deletePanelId) ?>" title="Smazat pokus <?= sprintf('%03d', $attemptNo) ?>" aria-label="Smazat pokus <?= sprintf('%03d', $attemptNo) ?>" aria-expanded="false" aria-controls="<?= Http::escape($deletePanelId) ?>"><span class="trash-icon" aria-hidden="true"></span></button>
                                                 <div class="popover take-delete-panel" id="<?= Http::escape($deletePanelId) ?>" data-panel hidden>
                                                     <h2>Smazat nahrávku?</h2>
-                                                    <form method="post" action="<?= Http::escape(Http::url('delete-take', ['id' => (string) $project['id']])) ?>" class="delete-take-form">
+                                                    <form method="post" action="<?= Http::escape(Http::url('delete-take', ['id' => (string) $project['id']])) ?>" class="delete-take-form" data-project-async>
                                                         <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
                                                         <input type="hidden" name="line_id" value="<?= Http::escape((string) $line['id']) ?>">
                                                         <input type="hidden" name="recording_id" value="<?= Http::escape((string) $take['id']) ?>">
@@ -196,8 +266,8 @@ $filter = (string) ($data['filter'] ?? 'all');
                                                 </div>
                                             </div>
                                         <?php endif; ?>
-                                        <?php if (empty($take['is_selected']) && (!empty($data['is_admin']) || ($project['role'] ?? '') === 'owner')): ?>
-                                            <form method="post" action="<?= Http::escape(Http::url('select-take', ['id' => (string) $project['id']])) ?>" class="inline-form">
+                                        <?php if (empty($take['is_selected']) && ($isAdmin || ($project['role'] ?? '') === 'owner')): ?>
+                                            <form method="post" action="<?= Http::escape(Http::url('select-take', ['id' => (string) $project['id']])) ?>" class="inline-form" data-project-async>
                                                 <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
                                                 <input type="hidden" name="line_id" value="<?= Http::escape((string) $line['id']) ?>">
                                                 <input type="hidden" name="recording_id" value="<?= Http::escape((string) $take['id']) ?>"><input type="hidden" name="page" value="<?= Http::escape((string) ($pagination['page'] ?? 1)) ?>"><input type="hidden" name="filter" value="<?= Http::escape($filter) ?>">
@@ -238,10 +308,12 @@ $filter = (string) ($data['filter'] ?? 'all');
             <?php else: ?>
                 <?php foreach ($playlist as $clip): ?>
                     <div class="playlist-line">
-                        <button type="button" class="playlist-play" data-play-item aria-label="Přehrát repliku <?= sprintf('%04d', (int) $clip['line_number']) ?> — <?= Http::escape((string) $clip['character']) ?>" title="<?= Http::escape((string) $clip['file_name']) ?>" data-src="<?= Http::escape((string) $clip['audio_url']) ?>" data-label="<?= Http::escape((string) $clip['character']) ?> — <?= Http::escape((string) $clip['chapter_title']) ?>"><span aria-hidden="true">▶</span><span><?= sprintf('%04d', (int) $clip['line_number']) ?> · <?= Http::escape((string) $clip['character']) ?></span></button>
+                        <button type="button" class="playlist-play" data-play-item data-recording-id="<?= Http::escape((string) $clip['recording_id']) ?>" aria-label="Přehrát repliku <?= sprintf('%04d', (int) $clip['line_number']) ?> — <?= Http::escape((string) $clip['character']) ?>" title="<?= Http::escape((string) $clip['file_name']) ?>" data-src="<?= Http::escape((string) $clip['audio_url']) ?>" data-label="<?= Http::escape((string) $clip['character']) ?> — <?= Http::escape((string) $clip['chapter_title']) ?>"><span aria-hidden="true">▶</span><span><?= sprintf('%04d', (int) $clip['line_number']) ?> · <?= Http::escape((string) $clip['character']) ?></span></button>
                     </div>
                 <?php endforeach; ?>
             <?php endif; ?>
         </div>
     </aside>
+</div>
+</div>
 </div>
