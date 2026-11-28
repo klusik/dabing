@@ -605,14 +605,15 @@ input:focus, textarea:focus { border-color: var(--forest); outline: 3px solid rg
     .take-hide-trigger { width: 44px; min-width: 44px; height: 44px; flex-basis: 44px; font-size: 14px; }
 }
 
-.playlist-line { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 2px; }
-.playlist-play { width: 24px; min-width: 24px; min-height: 24px; height: 24px; padding: 0; }
-.playlist-jump { min-width: 0; min-height: 24px; overflow: hidden; padding: 2px 5px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-size: 10px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-.playlist-jump:hover, .playlist-jump:focus-visible { border-color: rgba(49,93,75,.22); background: rgba(255,255,255,.45); }
-.playlist-line:has(.playlist-play[aria-current="true"]) { border-radius: 7px; background: rgba(215,237,138,.22); }
+.playlist-line { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 6px; min-height: 24px; padding-left: 3px; border-radius: 6px; background: rgba(255,255,255,.32); }
+.playlist-play { width: 12px; min-width: 12px; min-height: 24px; height: 24px; padding: 0; background: transparent; color: var(--forest); font-size: 9px; }
+.playlist-play:hover, .playlist-play[aria-current="true"] { background: transparent; }
+.playlist-jump { min-width: 0; min-height: 24px; overflow: hidden; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--forest); font: inherit; font-size: 10px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.playlist-jump:hover { text-decoration: underline; text-decoration-color: rgba(49,93,75,.45); text-underline-offset: 2px; }
+.playlist-line:has(.playlist-play[aria-current="true"]) { background: rgba(215,237,138,.32); }
 .playlist-play:focus-visible, .playlist-jump:focus-visible { outline: 2px solid rgba(183,122,53,.75); outline-offset: 1px; }
 @media (max-width: 680px) {
-    .playlist-line { grid-template-columns: 40px minmax(0, 1fr); min-height: 40px; }
-    .playlist-play { width: 40px; min-width: 40px; min-height: 40px; height: 40px; }
+    .playlist-line { grid-template-columns: 30px minmax(0, 1fr); gap: 0; min-height: 40px; }
+    .playlist-play { width: 30px; min-width: 30px; min-height: 40px; height: 40px; justify-content: flex-end; padding-right: 2px; }
     .playlist-jump { min-height: 40px; }
 }
