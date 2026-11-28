@@ -1,0 +1,135 @@
+/* Project: Dabing
+ * Repository: klusik/dabing
+ * File: public/assets/studio-audio-profiles.css
+ * Module Type: Stylesheet
+ * Purpose: Keep audio profile controls compact in the recording workspace.
+ * Responsibilities: Style assignment selectors and accessible progress states.
+ * Author: Rudolf Klusal
+ * License: All rights reserved
+ */
+.audio-profile-bulk { align-self: center; }
+.audio-profile-popover form { display: grid; gap: .45rem; min-width: min(18rem, 76vw); }
+.audio-profile-popover label { display: grid; gap: .15rem; font-size: .78rem; }
+.audio-profile-popover select,
+.line-identity form select,
+.take-row form select {
+    max-width: 10rem;
+    min-height: 2rem;
+    border: 1px solid var(--line, rgba(45, 65, 55, .2));
+    border-radius: .55rem;
+    padding: .25rem .45rem;
+    color: var(--ink, #263b32);
+    background: var(--surface, rgba(255, 255, 255, .78));
+    font: inherit;
+    font-size: .76rem;
+}
+.line-identity form,
+.take-row form[data-audio-profile-assignment] { display: grid; margin: 0; }
+.line-audio-profile-control,
+.take-audio-profile-control { position: relative; justify-self: center; }
+.audio-profile-trigger { width: 24px; min-width: 24px; height: 24px; flex-basis: 24px; }
+.audio-profile-popover {
+    z-index: 40;
+    width: min(250px, calc(100vw - 24px));
+    padding: .7rem;
+}
+.audio-profile-popover h2 { margin: 0 0 .45rem; font-size: .88rem; }
+.audio-profile-popover form { min-width: 0; }
+.take-profile-sample { justify-content: flex-start; width: auto; min-width: 0; gap: .4rem; margin-top: .4rem; padding-inline: .55rem; font-size: .75rem; }
+.audio-profile-popover select:focus-visible,
+.line-identity form select:focus-visible,
+.take-row form select:focus-visible {
+    outline: 2px solid var(--forest, #38634e);
+    outline-offset: 2px;
+}
+[data-audio-double-download][aria-busy="true"] { opacity: .55; pointer-events: none; }
+.project-action-status[data-audio-feedback]:not(:empty) {
+    flex-basis: 100%;
+    margin: .25rem 0 0;
+    color: var(--forest-deep, #274536);
+    font-size: .78rem;
+}
+/* Only rows that render a profile control reserve its explicit grid slot. */
+.take-row.has-audio-profile-control {
+    grid-template-columns: 32px 24px 24px 24px 24px minmax(80px, 1fr)
+        minmax(140px, 210px) 24px;
+    grid-template-rows: 24px;
+    column-gap: 4px;
+    min-height: 28px;
+}
+.take-row.has-audio-profile-control > .take-meta .attempt-badge { grid-column: 1; grid-row: 1; }
+.take-row.has-audio-profile-control > .take-meta .take-name { grid-column: 6; grid-row: 1; }
+.take-row.has-audio-profile-control > audio { grid-column: 7; grid-row: 1; width: 100%; height: 24px; }
+.take-row.has-audio-profile-control > .take-audio-profile-control { grid-column: 5; grid-row: 1; }
+.take-row.has-audio-profile-control > .take-hide-form { grid-column: 4; grid-row: 1; align-self: center; }
+.take-row.has-audio-profile-control > .take-delete-control { grid-column: 2; grid-row: 1; }
+.take-row.has-audio-profile-control > form.inline-form { grid-column: 3; grid-row: 1; }
+.take-row.has-audio-profile-control > .take-download { grid-column: 8; grid-row: 1; }
+.take-row:not(.has-audio-profile-control) {
+    grid-template-columns: 32px 24px 24px 24px minmax(100px, 1fr)
+        minmax(140px, 210px) 24px;
+}
+
+@media (max-width: 680px) {
+    .line-identity { flex-wrap: nowrap; gap: 5px; min-width: 0; }
+    .line-identity .line-number,
+    .line-identity .line-audio-profile-control { flex: 0 0 auto; }
+    .line-identity .audio-profile-trigger { width: 36px; min-width: 36px; height: 36px; }
+    .line-identity .character-name,
+    .line-identity .assigned-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .line-identity .assigned-name { max-width: 8rem; }
+    .take-row.has-audio-profile-control {
+        grid-template-columns: 32px 36px 36px 36px 36px minmax(0, 1fr) 36px;
+        grid-template-rows: 44px 34px;
+        gap: 0 2px;
+        padding: 0 4px;
+    }
+    .take-row.has-audio-profile-control > .take-meta .attempt-badge { grid-column: 1; grid-row: 1; }
+    .take-row.has-audio-profile-control > .take-meta .take-name { grid-column: 6; grid-row: 1; }
+    .take-row.has-audio-profile-control > audio { grid-column: 1 / -1; grid-row: 2; height: 34px; }
+    .take-row.has-audio-profile-control > .take-audio-profile-control { grid-column: 5; grid-row: 1; }
+    .take-row.has-audio-profile-control > .take-hide-form { grid-column: 4; grid-row: 1; }
+    .take-row.has-audio-profile-control > .take-delete-control { grid-column: 2; grid-row: 1; }
+    .take-row.has-audio-profile-control > form.inline-form { grid-column: 3; grid-row: 1; }
+    .take-row.has-audio-profile-control > .take-download { grid-column: 7; grid-row: 1; }
+    .take-row.has-audio-profile-control .take-delete-trigger,
+    .take-row.has-audio-profile-control .take-hide-trigger,
+    .take-row.has-audio-profile-control .take-select,
+    .take-row.has-audio-profile-control .take-download,
+    .take-row.has-audio-profile-control .audio-profile-trigger { width: 36px; min-width: 36px; height: 36px; }
+    .take-row.has-audio-profile-control > .take-audio-profile-control .audio-profile-trigger { width: 36px; }
+    .take-row:not(.has-audio-profile-control) {
+        grid-template-columns: 36px 44px 44px 44px minmax(0, 1fr) 44px;
+        grid-template-rows: 44px 38px;
+        gap: 1px 4px;
+        padding: 0 6px;
+    }
+    .take-row:not(.has-audio-profile-control) > .take-meta .take-name { grid-column: 5; grid-row: 1; }
+    .take-row:not(.has-audio-profile-control) > audio { grid-column: 1 / -1; grid-row: 2; height: 38px; }
+    .take-row:not(.has-audio-profile-control) > form.inline-form { grid-column: 3; grid-row: 1; }
+    .take-row:not(.has-audio-profile-control) > .take-hide-form { grid-column: 4; grid-row: 1; }
+    .take-row:not(.has-audio-profile-control) > .take-delete-control { grid-column: 2; grid-row: 1; }
+    .take-row:not(.has-audio-profile-control) > .take-download { grid-column: 6; grid-row: 1; }
+    .take-byline { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+@media (max-width: 360px) {
+    .line-identity .audio-profile-trigger { width: 32px; min-width: 32px; height: 32px; }
+    .take-row.has-audio-profile-control {
+        grid-template-columns: 32px 32px 32px 32px 32px minmax(0, 1fr) 32px;
+        grid-template-rows: 40px 32px;
+        gap: 0 1px;
+        padding: 0 3px;
+    }
+    .take-row.has-audio-profile-control .take-delete-trigger,
+    .take-row.has-audio-profile-control .take-hide-trigger,
+    .take-row.has-audio-profile-control .take-select,
+    .take-row.has-audio-profile-control .take-download,
+    .take-row.has-audio-profile-control .audio-profile-trigger { width: 32px; min-width: 32px; height: 32px; }
+    .take-row.has-audio-profile-control > .take-audio-profile-control .audio-profile-trigger { width: 32px; }
+    .take-row.has-audio-profile-control > audio { height: 32px; }
+}

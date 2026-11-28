@@ -181,7 +181,7 @@ final class StudioModel
      * @param bool $myTakesOnly Whether to page roles assigned to the viewer.
      * @param list<string> $characters Exact role names selected by an authorized viewer.
      * @param bool $paginate Whether to limit rendered lines to one page.
-     * @return array{project:array{id:int,title:string,role:string},chapters:list<array{id:int,title:string,lines:list<array{id:int,number:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,assigned_name:?string,can_record:bool,takes:list<array{id:int,attempt_no:int,media_type:string,user_id:?int,user_name:string,created_at:string,is_selected:bool,hidden:bool,can_hide:bool,can_delete:bool}>}>}>,members:list<array{id:int,name:string,is_active:bool,role:string}>,voices:list<array{character:string,assigned_user_id:?int,assigned_name:?string,assigned_users:list<int>,assigned_names:list<string>,line_count:int,dubbed_count:int}>,playlist:list<array{recording_id:int,line_id:int,line_number:int,line_page:int,in_filter:bool,character:string,chapter_title:string,attempt_no:int,media_type:string}>,pagination:array{enabled:bool,page:int,pages:int,total:int},has_recordings:bool,revision:string}|null
+     * @return array{project:array{id:int,title:string,role:string},chapters:list<array{id:int,title:string,lines:list<array{id:int,number:int,position:int,character:string,text:string,selected_recording_id:?int,selected_recording_user_id:?int,assigned_name:?string,can_record:bool,takes:list<array{id:int,attempt_no:int,media_type:string,user_id:?int,user_name:string,created_at:string,is_selected:bool,hidden:bool,can_hide:bool,can_delete:bool}>}>}>,members:list<array{id:int,name:string,is_active:bool,role:string}>,voices:list<array{character:string,assigned_user_id:?int,assigned_name:?string,assigned_users:list<int>,assigned_names:list<string>,line_count:int,dubbed_count:int}>,playlist:list<array{recording_id:int,line_id:int,line_number:int,line_page:int,in_filter:bool,character:string,chapter_title:string,attempt_no:int,media_type:string,user_id:?int}>,pagination:array{enabled:bool,page:int,pages:int,total:int},has_recordings:bool,revision:string}|null
      *     Ordered page and playback data, or null when access is not allowed.
      */
     public function projectView(
@@ -491,7 +491,7 @@ final class StudioModel
         $playlistQuery = $this->database->prepare(
             'SELECT r.id AS recording_id, l.id AS line_id,
                     l.character_name, c.title AS chapter_title,
-                    r.attempt_no, r.media_type
+                    r.attempt_no, r.media_type, r.user_id
              FROM dabing_script_lines l
              JOIN dabing_project_chapters c ON c.id = l.chapter_id
              JOIN dabing_recordings r
@@ -515,6 +515,8 @@ final class StudioModel
                 'chapter_title' => (string) $row['chapter_title'],
                 'attempt_no' => (int) $row['attempt_no'],
                 'media_type' => (string) $row['media_type'],
+                'user_id' => $row['user_id'] === null
+                    ? null : (int) $row['user_id'],
             ];
         }
 

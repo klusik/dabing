@@ -2,6 +2,8 @@ Options -Indexes
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteRule ^(?:$|index\.php|public/assets/[A-Za-z0-9_-]+\.(?:css|js|json|svg|png|webp|ico))$ - [L,NC]
+    RewriteRule ^public/assets/audio-profiles/[A-Za-z0-9_-]+\.(?:css|js)$ - [L,NC]
+    RewriteRule ^public/assets/studio-audio-profiles\.(?:css|js)$ - [L,NC]
     RewriteRule ^ - [F,L]
 </IfModule>
 <IfModule !mod_rewrite.c>

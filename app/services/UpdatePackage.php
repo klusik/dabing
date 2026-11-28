@@ -266,6 +266,8 @@ final class UpdatePackage
             || preg_match('/\Adatabase\/[A-Za-z0-9_-]+\.sql\z/D', $path) === 1
             || preg_match('/\Adatabase\/migrations\/[0-9]{4}_[a-z0-9_]+\.php\z/D', $path) === 1
             || preg_match('/\Apublic\/assets\/[A-Za-z0-9_-]+\.(?:css|js|json|svg|png|webp|ico)\z/D', $path) === 1
+            || preg_match('/\Apublic\/assets\/audio-profiles\/[A-Za-z0-9_-]+\.(?:css|js)\z/D', $path) === 1
+            || preg_match('/\Apublic\/assets\/studio-audio-profiles\.(?:css|js)\z/D', $path) === 1
             || preg_match('/\Aconfig\/[A-Za-z0-9_-]+\.example\.php\z/D', $path) === 1) {
             return true;
         }

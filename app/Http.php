@@ -300,18 +300,25 @@ final class Http
         return $query;
     }
 
-    /** Build a relative URL for one existing static asset with a content digest.
-     * @param string $filename Simple public asset filename.
+    /** Build a relative URL for an existing allowlisted asset with a content digest.
+     * @param string $filename Flat public asset filename, optionally under audio-profiles/.
      * @return string Relative URL with digest, or base asset path when invalid or missing.
      */
     public static function asset(string $filename): string
     {
-        if (preg_match('/\A[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\z/', $filename) !== 1
-            || str_contains($filename, '..')) {
+        if (preg_match(
+            '/\A(?:(audio-profiles)\/)?([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})\z/',
+            $filename,
+            $matches
+        ) !== 1 || str_contains($filename, '..')) {
             return './public/assets/';
         }
+        $segments = array_values(array_filter([
+            $matches[1] ?? '', $matches[2] ?? '',
+        ], static fn (string $segment): bool => $segment !== ''));
         $assetPath = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'public'
-            . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . $filename;
+            . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR
+            . implode(DIRECTORY_SEPARATOR, $segments);
         if (!is_file($assetPath) || !is_readable($assetPath)) {
             return './public/assets/';
         }
@@ -319,7 +326,8 @@ final class Http
         if (!is_string($digest)) {
             return './public/assets/';
         }
-        return './public/assets/' . rawurlencode($filename)
+        return './public/assets/'
+            . implode('/', array_map('rawurlencode', $segments))
             . '?v=' . $digest;
     }
 
@@ -358,6 +366,14 @@ final class Http
      *     revision?:string,pagination?:array{page:int,pages:int,total:int,enabled?:bool},
      *     playlist?:list<array{recording_id:int,line_id:int,line_number:int,line_page:int,in_filter:bool,character:string,chapter_title:string,attempt_no:int,media_type:string,file_name:string,audio_url:string,download_url:string}>,
      *     current_version?:string,latest_release?:array{version:string,url:string,sha256:string,size:int}|null,
+     *     audio_profiles?:list<array{id:int,name:string,chain:list<array<string,mixed>>}>,
+     *     audio_voice_rules?:array<string,array<string,int|null>>,
+     *     audio_has_effects?:bool,
+     *     profile?:array{id:int,name:string,chain:list<array<string,mixed>>}|null,
+     *     default_chain?:list<array{type:string,enabled:bool,settings:array<string,mixed>}>,
+     *     sample?:array{id:int,url:string,label:string}|null,
+     *     form_error?:string|null,submitted_name?:string|null,
+     *     submitted_chain_json?:string|null,profile_id?:int|null,
      *     can_invite?:bool,has_recordings?:bool,is_admin?:bool,export_url?:string,
      *     invite_valid?:bool,existing_account?:bool,wrong_account?:bool,
      *     recipient_email?:string,project_title?:string,code?:string,roles?:list<string>,
@@ -379,6 +395,7 @@ final class Http
             'account' => 'account.php',
             'projects' => 'projects.php', 'users' => 'users.php',
             'project' => 'project.php', 'email-join' => 'email-invite-join.php',
+            'audio-profiles' => 'audio-profiles.php',
             'update' => 'update.php', 'error' => 'error.php',
         ];
         if (!isset($templates[$view])) {

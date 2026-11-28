@@ -175,11 +175,11 @@ function closePanel(panel, trigger) {
  * Position an open contextual panel inside the viewport while retaining its anchor.
  * @param {HTMLElement} trigger - The button controlling the panel.
  * @param {HTMLElement} panel - The panel to position.
- * @returns {void} Oversized panels receive a bounded viewport position.
+ * @returns {void} Supported anchored panels remain bounded within the viewport.
  */
 function positionPanel(trigger, panel) {
     if (panel.hidden || !panel.matches(
-        '.cast-popover, .invite-popover, .users-popover, .character-filter-popover'
+        '.cast-popover, .invite-popover, .users-popover, .character-filter-popover, .audio-profile-popover'
     )) return;
     const edge = 12;
     const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
@@ -1168,13 +1168,25 @@ function bindPlaylist() {
         root.dataset.pendingPlaylistLineId = lineId;
         void refreshProjectView(root, target.href, 'push', true);
     };
-    const playIndex = (index, shouldPlay) => {
+    const playIndex = async (index, shouldPlay) => {
         const currentItems = items();
         if (index < 0 || index >= currentItems.length) return;
         const item = currentItems[index];
         state.currentIndex = index;
         state.currentId = item.dataset.recordingId ?? item.dataset.src ?? '';
-        player.src = item.dataset.src ?? '';
+        const playbackId = state.currentId;
+        let source = item.dataset.src ?? '';
+        try {
+            if (typeof window.dabingAudioPlaybackUrl === 'function') {
+                source = await window.dabingAudioPlaybackUrl(item);
+            }
+        } catch (error) {
+            if (status()) status().textContent = error instanceof Error
+                ? error.message : 'Zvukové efekty se nepodařilo zpracovat.';
+            return;
+        }
+        if (playbackId !== state.currentId) return;
+        player.src = source;
         player.load();
         const currentStatus = status();
         if (currentStatus) {
@@ -1313,7 +1325,7 @@ function bindDeferredAudioRefresh(root, content) {
  * Move stateful controls from existing lines into matching fresh server markup.
  * @param {HTMLElement} current - The currently displayed project content.
  * @param {HTMLElement} next - Parsed server-rendered project content.
- * @returns {void} Recorder, audio and anchored-panel nodes keep their browser state.
+ * @returns {void} Stateful controls persist and profile panels adopt fresh values.
  */
 function preserveProjectLineControls(current, next) {
     const oldLines = new Map(Array.from(
@@ -1344,7 +1356,45 @@ function preserveProjectLineControls(current, next) {
         line.querySelectorAll('[data-panel]').forEach((panel) => {
             const oldControl = oldPanels.get(panel.id);
             const newControl = panel.closest('.anchored-control');
-            if (oldControl && newControl) newControl.replaceWith(oldControl);
+            if (oldControl && newControl) {
+                if (panel.matches('[data-audio-profile-panel]')) {
+                    const oldSelect = oldControl.querySelector(
+                        'select[name="profile"]'
+                    );
+                    const newSelect = newControl.querySelector(
+                        'select[name="profile"]'
+                    );
+                    if (oldSelect && newSelect) {
+                        const selectedProfile = newSelect.value;
+                        oldSelect.replaceChildren(...Array.from(
+                            newSelect.options,
+                            (option) => option.cloneNode(true)
+                        ));
+                        oldSelect.value = selectedProfile;
+                    }
+                    const oldTrigger = oldControl.querySelector(
+                        '[data-panel-trigger]'
+                    );
+                    const newTrigger = newControl.querySelector(
+                        '[data-panel-trigger]'
+                    );
+                    if (oldTrigger && newTrigger) {
+                        oldTrigger.title = newTrigger.title;
+                        oldTrigger.setAttribute(
+                            'aria-label',
+                            newTrigger.getAttribute('aria-label') ?? ''
+                        );
+                    }
+                    const oldSample = oldControl.querySelector(
+                        '.take-profile-sample'
+                    );
+                    const newSample = newControl.querySelector(
+                        '.take-profile-sample'
+                    );
+                    if (oldSample && newSample) oldSample.href = newSample.href;
+                }
+                newControl.replaceWith(oldControl);
+            }
         });
     });
 }
@@ -1462,18 +1512,25 @@ function syncProjectShell(current, next) {
         actionForm?.querySelector('button')?.focus({ preventScroll: true });
     }
 
-    const currentZip = current.querySelector('.zip-export-control');
-    const nextZip = next.querySelector('.zip-export-control');
-    if (currentZip && nextZip) {
-        currentZip.href = nextZip.href;
-    } else if (currentZip) {
-        currentZip.remove();
-    } else if (nextZip) {
-        current.querySelector('.studio-toolbar-actions')?.append(nextZip);
-    }
+    const syncExportControl = (selector, update) => {
+        const currentControl = current.querySelector(selector);
+        const nextControl = next.querySelector(selector);
+        if (currentControl && nextControl) update(currentControl, nextControl);
+        else if (currentControl) currentControl.remove();
+        else if (nextControl) current.querySelector('.studio-toolbar-actions')?.append(nextControl);
+    };
+    syncExportControl('a.zip-export-control:not([data-audio-book-export])', (button, fresh) => {
+        button.href = fresh.href;
+    });
+    syncExportControl('[data-audio-book-export]', (button, fresh) => {
+        button.dataset.url = fresh.dataset.url ?? '';
+        button.title = fresh.title;
+        button.setAttribute('aria-label', fresh.getAttribute('aria-label') ?? '');
+    });
 
     current.dataset.revision = next.dataset.revision ?? '';
     current.dataset.pagingEnabled = next.dataset.pagingEnabled ?? 'off';
+    current.dataset.audioProfiles = next.dataset.audioProfiles ?? '[]';
 }
 
 /**

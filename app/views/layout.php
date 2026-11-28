@@ -24,7 +24,17 @@ use Dabing\Http;
     <?php if (($view ?? '') === 'users'): ?>
         <link rel="stylesheet" href="<?= Http::escape(Http::asset('users.css')) ?>">
     <?php endif; ?>
+    <?php if (($view ?? '') === 'audio-profiles'): ?>
+        <link rel="stylesheet" href="<?= Http::escape(Http::asset('audio-profiles/audio-profile-editor.css')) ?>">
+    <?php elseif (($view ?? '') === 'project'): ?>
+        <link rel="stylesheet" href="<?= Http::escape(Http::asset('studio-audio-profiles.css')) ?>">
+    <?php endif; ?>
     <script src="<?= Http::escape(Http::asset('site.js')) ?>" defer></script>
+    <?php if (($view ?? '') === 'audio-profiles'): ?>
+        <script type="module" src="<?= Http::escape(Http::asset('audio-profiles/audio-profile-editor.js')) ?>"></script>
+    <?php elseif (($view ?? '') === 'project'): ?>
+        <script type="module" src="<?= Http::escape(Http::asset('studio-audio-profiles.js')) ?>"></script>
+    <?php endif; ?>
 </head>
 <body>
     <a class="skip-link" href="#main">Přejít k obsahu</a>
@@ -33,12 +43,13 @@ use Dabing\Http;
             <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
             <span>Dabing<span class="brand-period">.</span></span>
         </a>
-        <nav class="top-nav" aria-label="Hlavní navigace">
+        <nav class="top-nav" aria-label="Hlavní navigace"<?= !empty($user['is_admin']) ? ' data-admin-audio-nav' : '' ?>>
             <?php if ($user): ?>
                 <a class="icon-control" href="<?= Http::escape(Http::url('projects')) ?>" aria-label="Moje knihy" title="Moje knihy"><span aria-hidden="true">▦</span></a>
                 <a class="icon-control" href="<?= Http::escape(Http::url('account')) ?>" aria-label="Účet <?= Http::escape((string) $user['name']) ?>" title="Účet"><span aria-hidden="true">♙</span></a>
                 <?php if (!empty($user['is_admin'])): ?>
                     <a class="icon-control" href="<?= Http::escape(Http::url('users')) ?>" aria-label="Uživatelé" title="Uživatelé"><span aria-hidden="true">♧</span></a>
+                    <a class="icon-control" href="<?= Http::escape(Http::url('audio-profiles')) ?>" aria-label="Zvukové profily" title="Zvukové profily"><span aria-hidden="true">♫</span></a>
                     <a class="icon-control" href="<?= Http::escape(Http::url('update')) ?>" aria-label="Aktualizace" title="Aktualizace"><span aria-hidden="true">⟳</span></a>
                 <?php endif; ?>
                 <form method="post" action="<?= Http::escape(Http::url('logout')) ?>" class="nav-form">
