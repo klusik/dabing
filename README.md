@@ -92,6 +92,12 @@ a revizi knihy pro živé obnovování zobrazení. Pokud běžný databázový �
 nemůže měnit schéma, zadejte účet s oprávněním DDL do pole
 **Databázová oprávnění**.
 
+### Aktualizace z verze 0.3.0
+
+Před aktualizací zálohujte databázi a úložiště. Nainstalujte vydání 0.4.0
+přes **Aktualizace**. Updater aplikuje migraci `0003_audio_profiles.php`,
+která přidá tabulky zvukových profilů a jejich projektových přiřazení.
+
 ## Scénář
 
 U importu otevřete `?` a použijte ukázku nebo zkopírujte pokyny. Vlastní
@@ -281,16 +287,16 @@ schváleným postupem, který respektuje ochrany větve. Ověřte přesný commi
 `origin/main` a z něj sestavte balík mimo pracovní kopii.
 
 ```sh
-php scripts/build-update.php 0.3.0 ../dabing-0.3.0.zip
+php scripts/build-update.php 0.4.0 ../dabing-0.4.0.zip
 ```
 
-Balík `dabing-0.3.0.zip` patří jako asset ke stabilnímu vydání s přesným tagem
-`0.3.0` v `klusik/dabing`. Updater přijímá také značku `v` před verzí.
+Balík `dabing-0.4.0.zip` patří jako asset ke stabilnímu vydání s přesným tagem
+`0.4.0` v `klusik/dabing`. Updater přijímá také značku `v` před verzí.
 Po schválení vydání označte ověřený commit `origin/main` a odešlete tag.
 
 ```sh
-git tag 0.3.0 origin/main
-git push origin refs/tags/0.3.0
+git tag 0.4.0 origin/main
+git push origin refs/tags/0.4.0
 ```
 Verze balíku musí odpovídat tagu a GitHub musí k assetu uvádět kontrolní součet
 SHA-256. Archiv má jediný kořen
