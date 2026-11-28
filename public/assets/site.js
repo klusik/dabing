@@ -175,11 +175,11 @@ function closePanel(panel, trigger) {
  * Position an open contextual panel inside the viewport while retaining its anchor.
  * @param {HTMLElement} trigger - The button controlling the panel.
  * @param {HTMLElement} panel - The panel to position.
- * @returns {void} Oversized panels receive a bounded viewport position.
+ * @returns {void} Supported anchored panels remain bounded within the viewport.
  */
 function positionPanel(trigger, panel) {
     if (panel.hidden || !panel.matches(
-        '.cast-popover, .invite-popover, .users-popover, .character-filter-popover'
+        '.cast-popover, .invite-popover, .users-popover, .character-filter-popover, .audio-profile-popover'
     )) return;
     const edge = 12;
     const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
@@ -1325,7 +1325,7 @@ function bindDeferredAudioRefresh(root, content) {
  * Move stateful controls from existing lines into matching fresh server markup.
  * @param {HTMLElement} current - The currently displayed project content.
  * @param {HTMLElement} next - Parsed server-rendered project content.
- * @returns {void} Recorder, audio and anchored-panel nodes keep their browser state.
+ * @returns {void} Stateful controls persist and profile panels adopt fresh values.
  */
 function preserveProjectLineControls(current, next) {
     const oldLines = new Map(Array.from(
@@ -1356,7 +1356,45 @@ function preserveProjectLineControls(current, next) {
         line.querySelectorAll('[data-panel]').forEach((panel) => {
             const oldControl = oldPanels.get(panel.id);
             const newControl = panel.closest('.anchored-control');
-            if (oldControl && newControl) newControl.replaceWith(oldControl);
+            if (oldControl && newControl) {
+                if (panel.matches('[data-audio-profile-panel]')) {
+                    const oldSelect = oldControl.querySelector(
+                        'select[name="profile"]'
+                    );
+                    const newSelect = newControl.querySelector(
+                        'select[name="profile"]'
+                    );
+                    if (oldSelect && newSelect) {
+                        const selectedProfile = newSelect.value;
+                        oldSelect.replaceChildren(...Array.from(
+                            newSelect.options,
+                            (option) => option.cloneNode(true)
+                        ));
+                        oldSelect.value = selectedProfile;
+                    }
+                    const oldTrigger = oldControl.querySelector(
+                        '[data-panel-trigger]'
+                    );
+                    const newTrigger = newControl.querySelector(
+                        '[data-panel-trigger]'
+                    );
+                    if (oldTrigger && newTrigger) {
+                        oldTrigger.title = newTrigger.title;
+                        oldTrigger.setAttribute(
+                            'aria-label',
+                            newTrigger.getAttribute('aria-label') ?? ''
+                        );
+                    }
+                    const oldSample = oldControl.querySelector(
+                        '.take-profile-sample'
+                    );
+                    const newSample = newControl.querySelector(
+                        '.take-profile-sample'
+                    );
+                    if (oldSample && newSample) oldSample.href = newSample.href;
+                }
+                newControl.replaceWith(oldControl);
+            }
         });
     });
 }

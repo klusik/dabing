@@ -133,6 +133,7 @@ if ($filter === 'characters') {
     data-project-id="<?= Http::escape((string) $project['id']) ?>"
 >
     <?php $audioProfiles = is_array($data['audio_profiles'] ?? null) ? $data['audio_profiles'] : []; ?>
+    <?php $audioProfileNamesById = array_column($audioProfiles, 'name', 'id'); ?>
     <?php if ($isAdmin && $audioProfiles !== []): ?>
         <div class="anchored-control audio-profile-bulk">
             <button class="icon-control" type="button" data-panel-trigger="audio-profile-bulk-panel" title="Zvukové profily" aria-label="Zvukové profily" aria-expanded="false" aria-controls="audio-profile-bulk-panel"><span aria-hidden="true">♫</span></button>
@@ -255,8 +256,41 @@ if ($filter === 'characters') {
                 <div class="chapter-heading"><span class="chapter-index">Kapitola</span><h2 id="chapter-<?= Http::escape((string) $chapter['id']) ?>"><?= Http::escape((string) $chapter['title']) ?></h2><span class="chapter-rule"></span></div>
                 <div class="line-list">
                     <?php foreach ($chapter['lines'] as $line): ?>
+                        <?php
+                        $lineProfileOverride = $line['audio_profile_override'] ?? null;
+                        $lineProfileLabel = $lineProfileOverride === null
+                            ? 'Dědit'
+                            : ((int) $lineProfileOverride === 0
+                                ? 'Bez efektů'
+                                : (string) ($audioProfileNamesById[(int) $lineProfileOverride] ?? 'Profil'));
+                        $lineProfilePanelId = 'audio-profile-line-' . (int) $line['id'];
+                        ?>
                         <article class="line-card" id="line-<?= Http::escape((string) $line['id']) ?>" data-line-card data-line-id="<?= Http::escape((string) $line['id']) ?>">
-                            <div class="line-identity"><span class="line-number"><?= sprintf('%04d', (int) ($line['number'] ?? $line['position'])) ?></span><span class="character-name"><?= Http::escape((string) $line['character']) ?></span><?php if (!empty($line['assigned_name'])): ?><span class="assigned-name" title="Přiřazeno: <?= Http::escape((string) $line['assigned_name']) ?>"><?= Http::escape((string) $line['assigned_name']) ?></span><?php endif; ?><?php if ($isAdmin && $audioProfiles !== []): ?><form data-audio-profile-assignment data-project-async data-scope="line" action="<?= Http::escape(Http::url('assign-audio-profile', ['id' => (string) $projectId])) ?>"><input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>"><input type="hidden" name="scope" value="line"><input type="hidden" name="target_id" value="<?= (int) $line['id'] ?>"><select name="profile" aria-label="Zvukový profil repliky <?= sprintf('%04d', (int) ($line['number'] ?? $line['position'])) ?>"><option value="inherit"<?= ($line['audio_profile_override'] ?? null) === null ? ' selected' : '' ?>>Dědit</option><option value="none"<?= (int) ($line['audio_profile_override'] ?? -1) === 0 ? ' selected' : '' ?>>Bez efektů</option><?php foreach ($audioProfiles as $audioProfile): ?><option value="<?= (int) $audioProfile['id'] ?>"<?= (int) ($line['audio_profile_override'] ?? -1) === (int) $audioProfile['id'] ? ' selected' : '' ?>><?= Http::escape((string) $audioProfile['name']) ?></option><?php endforeach; ?></select></form><?php endif; ?></div>
+                            <div class="line-identity">
+                                <span class="line-number"><?= sprintf('%04d', (int) ($line['number'] ?? $line['position'])) ?></span>
+                                <span class="character-name"><?= Http::escape((string) $line['character']) ?></span>
+                                <?php if (!empty($line['assigned_name'])): ?>
+                                    <span class="assigned-name" title="Přiřazeno: <?= Http::escape((string) $line['assigned_name']) ?>"><?= Http::escape((string) $line['assigned_name']) ?></span>
+                                <?php endif; ?>
+                                <?php if ($isAdmin && $audioProfiles !== []): ?>
+                                    <div class="anchored-control line-audio-profile-control">
+                                        <button class="icon-control audio-profile-trigger" type="button" data-panel-trigger="<?= Http::escape($lineProfilePanelId) ?>" title="Zvukový profil: <?= Http::escape($lineProfileLabel) ?>" aria-label="Zvukový profil repliky <?= sprintf('%04d', (int) ($line['number'] ?? $line['position'])) ?>: <?= Http::escape($lineProfileLabel) ?>" aria-expanded="false" aria-controls="<?= Http::escape($lineProfilePanelId) ?>"><span aria-hidden="true">♫</span></button>
+                                        <div class="popover audio-profile-popover" id="<?= Http::escape($lineProfilePanelId) ?>" data-panel data-audio-profile-panel hidden>
+                                            <h2>Profil repliky <?= sprintf('%04d', (int) ($line['number'] ?? $line['position'])) ?></h2>
+                                            <form data-audio-profile-assignment data-project-async data-scope="line" action="<?= Http::escape(Http::url('assign-audio-profile', ['id' => (string) $projectId])) ?>">
+                                                <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
+                                                <input type="hidden" name="scope" value="line">
+                                                <input type="hidden" name="target_id" value="<?= (int) $line['id'] ?>">
+                                                <label>Profil <select name="profile" aria-label="Profil repliky" required>
+                                                    <option value="inherit"<?= $lineProfileOverride === null ? ' selected' : '' ?>>Dědit z obsazení</option>
+                                                    <option value="none"<?= (int) ($lineProfileOverride ?? -1) === 0 ? ' selected' : '' ?>>Bez efektů</option>
+                                                    <?php foreach ($audioProfiles as $audioProfile): ?><option value="<?= (int) $audioProfile['id'] ?>"<?= (int) ($lineProfileOverride ?? -1) === (int) $audioProfile['id'] ? ' selected' : '' ?>><?= Http::escape((string) $audioProfile['name']) ?></option><?php endforeach; ?>
+                                                </select></label>
+                                            </form>
+                                        </div>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
                             <p class="line-text"><?= Http::escape((string) $line['text']) ?></p>
                             <div class="take-list">
                                 <?php foreach ($line['takes'] as $take): ?>
@@ -270,9 +304,16 @@ if ($filter === 'characters') {
                                             'id' => (string) $take['id'],
                                             'download' => 1,
                                         ]));
+                                    $takeProfileOverride = $take['audio_profile_override'] ?? null;
+                                    $takeProfileLabel = $takeProfileOverride === null
+                                        ? 'Dědit'
+                                        : ((int) $takeProfileOverride === 0
+                                            ? 'Bez efektů'
+                                            : (string) ($audioProfileNamesById[(int) $takeProfileOverride] ?? 'Profil'));
+                                    $takeProfilePanelId = 'audio-profile-take-' . (int) $take['id'];
                                     ?>
                                     <?php $isHidden = !empty($take['hidden']); ?>
-                                    <div class="take-row<?= !empty($take['is_selected']) ? ' take-selected' : '' ?><?= !empty($take['can_delete']) ? ' take-row-has-delete' : '' ?><?= $isHidden ? ' take-hidden' : '' ?>" data-recording-id="<?= Http::escape((string) $take['id']) ?>" data-audio-profile-id="<?= Http::escape((string) ($take['audio_profile_id'] ?? '')) ?>">
+                                    <div class="take-row<?= !empty($take['is_selected']) ? ' take-selected' : '' ?><?= !empty($take['can_delete']) ? ' take-row-has-delete' : '' ?><?= $isHidden ? ' take-hidden' : '' ?><?= $isAdmin && $audioProfiles !== [] ? ' has-audio-profile-control' : '' ?>" data-recording-id="<?= Http::escape((string) $take['id']) ?>" data-audio-profile-id="<?= Http::escape((string) ($take['audio_profile_id'] ?? '')) ?>">
                                         <div class="take-meta">
                                             <span class="attempt-badge" title="Číslo pokusu"><?= sprintf('%03d', $attemptNo) ?></span>
                                             <span class="take-name" title="<?= Http::escape((string) $take['user_name']) ?>">
@@ -282,15 +323,25 @@ if ($filter === 'characters') {
                                         </div>
                                         <audio data-take-audio="<?= Http::escape((string) $take['id']) ?>" preload="none" controls src="<?= Http::escape($audioUrl) ?>" aria-label="Přehrát pokus <?= sprintf('%03d', $attemptNo) ?> od <?= Http::escape((string) $take['user_name']) ?>"></audio>
                                         <?php if ($isAdmin && $audioProfiles !== []): ?>
-                                            <form data-audio-profile-assignment data-project-async data-scope="take" action="<?= Http::escape(Http::url('assign-audio-profile', ['id' => (string) $projectId])) ?>">
-                                                <input type="hidden" name="scope" value="take">
-                                                <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>"><input type="hidden" name="target_id" value="<?= (int) $take['id'] ?>">
-                                                <select name="profile" aria-label="Zvukový profil pokusu <?= sprintf('%03d', $attemptNo) ?>"><option value="inherit"<?= ($take['audio_profile_override'] ?? null) === null ? ' selected' : '' ?>>Dědit</option><option value="none"<?= (int) ($take['audio_profile_override'] ?? -1) === 0 ? ' selected' : '' ?>>Bez efektů</option><?php foreach ($audioProfiles as $audioProfile): ?><option value="<?= (int) $audioProfile['id'] ?>"<?= (int) ($take['audio_profile_override'] ?? -1) === (int) $audioProfile['id'] ? ' selected' : '' ?>><?= Http::escape((string) $audioProfile['name']) ?></option><?php endforeach; ?></select>
-                                            </form>
-                                            <a class="icon-control" href="<?= Http::escape(Http::url('audio-profiles', array_filter([
-                                                'id' => $take['audio_profile_id'] ?? null,
-                                                'sample' => $take['id'],
-                                            ], static fn (mixed $value): bool => $value !== null))) ?>" title="Vyzkoušet zvukový profil" aria-label="Vyzkoušet zvukový profil na této nahrávce"><span aria-hidden="true">♫</span></a>
+                                            <div class="anchored-control take-audio-profile-control" data-take-audio-profile>
+                                                <button class="icon-control audio-profile-trigger" type="button" data-panel-trigger="<?= Http::escape($takeProfilePanelId) ?>" title="Zvukový profil: <?= Http::escape($takeProfileLabel) ?>" aria-label="Zvukový profil pokusu <?= sprintf('%03d', $attemptNo) ?>: <?= Http::escape($takeProfileLabel) ?>" aria-expanded="false" aria-controls="<?= Http::escape($takeProfilePanelId) ?>"><span aria-hidden="true">♫</span></button>
+                                                <div class="popover audio-profile-popover take-audio-profile-popover" id="<?= Http::escape($takeProfilePanelId) ?>" data-panel data-audio-profile-panel hidden>
+                                                    <h2>Zvukový profil · pokus <?= sprintf('%03d', $attemptNo) ?></h2>
+                                                    <form data-audio-profile-assignment data-project-async data-scope="take" action="<?= Http::escape(Http::url('assign-audio-profile', ['id' => (string) $projectId])) ?>">
+                                                        <input type="hidden" name="scope" value="take">
+                                                        <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>"><input type="hidden" name="target_id" value="<?= (int) $take['id'] ?>">
+                                                        <label>Profil <select name="profile" aria-label="Profil pokusu" required>
+                                                            <option value="inherit"<?= $takeProfileOverride === null ? ' selected' : '' ?>>Dědit z repliky</option>
+                                                            <option value="none"<?= (int) ($takeProfileOverride ?? -1) === 0 ? ' selected' : '' ?>>Bez efektů</option>
+                                                            <?php foreach ($audioProfiles as $audioProfile): ?><option value="<?= (int) $audioProfile['id'] ?>"<?= (int) ($takeProfileOverride ?? -1) === (int) $audioProfile['id'] ? ' selected' : '' ?>><?= Http::escape((string) $audioProfile['name']) ?></option><?php endforeach; ?>
+                                                        </select></label>
+                                                    </form>
+                                                    <a class="icon-control take-profile-sample" href="<?= Http::escape(Http::url('audio-profiles', array_filter([
+                                                        'id' => $take['audio_profile_id'] ?? null,
+                                                        'sample' => $take['id'],
+                                                    ], static fn (mixed $value): bool => $value !== null))) ?>" title="Vyzkoušet profil na této nahrávce" aria-label="Vyzkoušet profil na této nahrávce"><span aria-hidden="true">▶</span><span>Vyzkoušet</span></a>
+                                                </div>
+                                            </div>
                                         <?php endif; ?>
                                         <a class="icon-control take-download" data-audio-double-download data-file-name="<?= Http::escape($fileName) ?>" href="<?= Http::escape($downloadUrl) ?>"<?= $fileName !== '' ? ' download="' . Http::escape($fileName) . '"' : '' ?> title="Stáhnout <?= Http::escape($fileName !== '' ? $fileName : 'nahrávku') ?>" aria-label="Stáhnout <?= Http::escape($fileName !== '' ? $fileName : 'nahrávku') ?>"><span aria-hidden="true">↓</span></a>
                                         <?php if (!empty($take['can_hide']) || ($isAdmin && $isHidden)): ?>

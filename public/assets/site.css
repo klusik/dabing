@@ -617,3 +617,25 @@ input:focus, textarea:focus { border-color: var(--forest); outline: 3px solid rg
     .playlist-play { width: 30px; min-width: 30px; min-height: 40px; height: 40px; justify-content: flex-end; padding-right: 2px; }
     .playlist-jump { min-height: 40px; }
 }
+
+/* Keep the six admin actions on one row at phone widths; <=360px retains the
+   established wrapped arrangement for the smaller viewport. */
+@media (min-width: 361px) and (max-width: 420px) {
+    .site-header:has(.top-nav[data-admin-audio-nav]) { padding-inline: 4%; }
+    .site-header:has(.top-nav[data-admin-audio-nav]) .brand {
+        gap: 4px;
+        font-size: 18px;
+    }
+    .site-header:has(.top-nav[data-admin-audio-nav]) .brand-mark {
+        padding-inline: 2px;
+    }
+    .top-nav[data-admin-audio-nav] { flex-wrap: nowrap; flex-shrink: 0; gap: 4px; }
+    .top-nav[data-admin-audio-nav] .icon-control {
+        width: 38px;
+        min-width: 38px;
+        height: 44px;
+        flex: 0 0 38px;
+        border-radius: 9px;
+        font-size: 18px;
+    }
+}
