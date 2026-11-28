@@ -150,6 +150,7 @@ nový pokus dostane číslo za nejvyšším dosavadním.
 Správce i spolupracovník s přístupem ke knize mohou filtrovat podle několika
 postav najednou. Bez vybraných postav se zobrazí všechny repliky. Filtr nemění
 právo k nahrávání; spolupracovník může nahrávat pouze přiřazené role.
+Při změně filtru zůstane stránka na stejné svislé pozici.
 Stránkování je ve výchozím nastavení
 vypnuté; jeho volba se ukládá pro knihu, účet a prohlížeč. Dabing průběžně
 obnovuje zobrazení při nahrání pokusu, změně vybraného záběru nebo jeho skrytí
