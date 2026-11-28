@@ -109,12 +109,55 @@ final class StudioController
         if ($projectId === null) {
             throw new HttpError(404, 'Kniha nebyla nalezena.');
         }
+        $isAdmin = !empty($this->user['is_admin']);
+        if (Http::query('view') === 'revision') {
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_write_close();
+            }
+            $revision = $this->model->projectRevision(
+                $projectId, $this->userId(), $isAdmin
+            );
+            if ($revision === null) {
+                throw new HttpError(404, 'Kniha nebyla nalezena.');
+            }
+            Http::json(['ok' => true, 'revision' => $revision]);
+        }
+        if (Http::query('filter') === 'characters' && !$isAdmin) {
+            throw new HttpError(403, 'Výběr postav je dostupný pouze správcům.');
+        }
+        $characters = [];
+        $filter = Http::query('filter');
+        if ($isAdmin && $filter === 'characters') {
+            if ($this->model->projectRevision(
+                $projectId, $this->userId(), $isAdmin
+            ) === null) {
+                throw new HttpError(404, 'Kniha nebyla nalezena.');
+            }
+            $projectRoles = $this->model->projectRoles($projectId);
+            $submitted = $_GET['characters'] ?? [];
+            if (is_array($submitted)
+                && count(array_filter($submitted, 'is_string')) === count($submitted)) {
+                foreach ($submitted as $character) {
+                    if (in_array($character, $projectRoles, true)
+                        && !in_array($character, $characters, true)) {
+                        $characters[] = $character;
+                    }
+                }
+            }
+            if ($characters === []) {
+                $filter = 'all';
+            }
+        }
+        $paging = Http::query('paging');
+        $hasPageBookmark = Http::queryId('page') !== null;
         $view = $this->model->projectView(
             $projectId,
             $this->userId(),
             Http::queryId('page') ?? 1,
-            !empty($this->user['is_admin']),
-            Http::query('filter') === 'mine'
+            $isAdmin,
+            $filter === 'mine',
+            $characters,
+            $paging === 'on' || ($paging === '' && $hasPageBookmark)
         );
         if ($view === null) {
             throw new HttpError(404, 'Kniha nebyla nalezena.');
@@ -159,7 +202,9 @@ final class StudioController
         unset($track);
         $view['can_invite'] = $view['project']['role'] === 'owner';
         $view['is_admin'] = !empty($this->user['is_admin']);
-        $view['filter'] = Http::query('filter') === 'mine' ? 'mine' : 'all';
+        $view['filter'] = $filter === 'mine' ? 'mine'
+            : ($filter === 'characters' ? 'characters' : 'all');
+        $view['characters'] = $characters;
         $view['email_invites'] = $view['project']['role'] !== 'owner'
             ? [] : (new EmailInviteService(
                 $this->database,
@@ -323,6 +368,7 @@ final class StudioController
             throw new HttpError(405, 'Metoda není podporována.');
         }
         Http::requireCsrf();
+        $wantsJson = Http::wantsJson();
         $projectId = Http::queryId('id');
         $page = Http::postId('page') ?? 1;
         $lineId = Http::postId('line_id');
@@ -337,11 +383,10 @@ final class StudioController
             )) {
             throw new HttpError(403, 'Tento záznam nelze vybrat.');
         }
-        Http::redirect('project', [
-            'id' => $projectId,
-            'page' => $page,
-            'filter' => Http::post('filter') ?: 'all',
-        ]);
+        if ($wantsJson) {
+            Http::json(['ok' => true, 'message' => 'Pokus byl vybrán.']);
+        }
+        $this->redirectToProject($projectId, $page);
     }
 
     /**
@@ -355,11 +400,21 @@ final class StudioController
             throw new HttpError(405, 'Metoda není podporována.');
         }
         Http::requireCsrf();
+        $wantsJson = Http::wantsJson();
         $projectId = Http::queryId('id');
         $lineId = Http::postId('line_id');
         $recordingId = Http::postId('recording_id');
         $page = Http::postId('page') ?? 1;
+        if (empty($this->user['is_admin'])) {
+            throw new HttpError(403, 'Pokus může trvale odstranit pouze správce.');
+        }
         if ($projectId === null || $lineId === null || $recordingId === null) {
+            if ($wantsJson) {
+                Http::json([
+                    'ok' => false,
+                    'message' => 'Chybí kniha, replika nebo pokus.',
+                ], 422);
+            }
             Http::notice('error', 'Chybí kniha, replika nebo pokus.');
             Http::redirect('projects');
         }
@@ -372,11 +427,73 @@ final class StudioController
                 !empty($this->user['is_admin'])
             );
         } catch (FormError $error) {
+            if ($wantsJson) {
+                Http::json([
+                    'ok' => false,
+                    'message' => $error->getMessage(),
+                ], 422);
+            }
             Http::notice('error', $error->getMessage());
-            Http::redirect('project', ['id' => $projectId, 'page' => $page]);
+            $this->redirectToProject($projectId, $page);
+        }
+        if ($wantsJson) {
+            Http::json(['ok' => true, 'message' => 'Pokus byl trvale odstraněn.']);
         }
         Http::notice('success', 'Pokus byl odstraněn.');
-        Http::redirect('project', ['id' => $projectId, 'page' => $page]);
+        $this->redirectToProject($projectId, $page);
+    }
+
+    /** Hide or restore one of the current user's takes in a project.
+     * @return void No value is returned.
+     */
+    public function hideTake(): void
+    {
+        if (Http::method() !== 'POST') {
+            throw new HttpError(405, 'Metoda není podporována.');
+        }
+        Http::requireCsrf();
+        $wantsJson = Http::wantsJson();
+        $projectId = Http::queryId('id');
+        $lineId = Http::postId('line_id');
+        $recordingId = Http::postId('recording_id');
+        $hiddenValue = Http::post('hidden', false);
+        if ($projectId === null || $lineId === null || $recordingId === null
+            || !in_array($hiddenValue, ['0', '1'], true)) {
+            if ($wantsJson) {
+                Http::json([
+                    'ok' => false,
+                    'message' => 'Chybí kniha, replika, pokus nebo platný stav.',
+                ], 422);
+            }
+            Http::notice('error', 'Chybí kniha, replika, pokus nebo platný stav.');
+            Http::redirect('projects');
+        }
+        $hidden = $hiddenValue === '1';
+        try {
+            $this->service->setTakeHidden(
+                $projectId,
+                $lineId,
+                $recordingId,
+                $this->userId(),
+                $hidden,
+                !empty($this->user['is_admin'])
+            );
+        } catch (FormError $error) {
+            if ($wantsJson) {
+                Http::json([
+                    'ok' => false,
+                    'message' => $error->getMessage(),
+                ], 422);
+            }
+            Http::notice('error', $error->getMessage());
+            $this->redirectToProject($projectId);
+        }
+        $message = $hidden ? 'Pokus byl skryt.' : 'Pokus byl obnoven.';
+        if ($wantsJson) {
+            Http::json(['ok' => true, 'message' => $message]);
+        }
+        Http::notice('success', $message);
+        $this->redirectToProject($projectId);
     }
 
     /**
@@ -680,9 +797,33 @@ final class StudioController
         }
         return $contents;
     }
-    /**
-     * Return the authenticated user's numeric identifier.
-     *
+    /** Redirect to a project while retaining simple view controls.
+     * @param int $projectId Authorized project identifier.
+     * @param int|null $page Existing page from the submitted form, when present.
+     * @return never Does not return.
+     */
+    private function redirectToProject(int $projectId, ?int $page = null): never
+    {
+        $filter = Http::post('filter') ?: Http::query('filter');
+        if (!in_array($filter, ['mine', 'characters'], true)) {
+            $filter = 'all';
+        }
+        $params = [
+            'id' => $projectId,
+            'page' => $page ?? Http::postId('page')
+                ?? Http::queryId('page') ?? 1,
+            'filter' => $filter,
+        ];
+        $paging = Http::post('paging') ?: Http::query('paging');
+        $hasPageBookmark = Http::postId('page') !== null
+            || Http::queryId('page') !== null;
+        if ($paging === 'on' || ($paging === '' && $hasPageBookmark)) {
+            $params['paging'] = 'on';
+        }
+        Http::redirect('project', $params);
+    }
+
+    /** Return the authenticated user's numeric identifier.
      * @return int Authenticated user id.
      * @throws HttpError If the user row has no valid id.
      */

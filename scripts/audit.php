@@ -14,11 +14,13 @@ declare(strict_types=1);
  */
 
 use Dabing\InstallModel;
+use Dabing\StudioModel;
 use Dabing\UpdateMigrationService;
 
 require_once dirname(__DIR__) . '/app/HttpError.php';
 require_once dirname(__DIR__) . '/app/models/AccountModel.php';
 require_once dirname(__DIR__) . '/app/models/InstallModel.php';
+require_once dirname(__DIR__) . '/app/models/StudioModel.php';
 require_once dirname(__DIR__) . '/app/models/UpdateMigrationModel.php';
 require_once dirname(__DIR__) . '/app/services/UpdateMigrationService.php';
 
@@ -473,7 +475,8 @@ function auditLegacyUpgrade(string $host, int $port, string $rootPassword): void
         $database->exec(
             "INSERT INTO dabing_recordings "
             . '(id,line_id,user_id,storage_key,media_type,byte_size,attempt_no) '
-            . "VALUES (77,61,1,REPEAT('a',64),'audio/webm',1234,1)"
+            . "VALUES (77,61,1,REPEAT('a',64),'audio/webm',1234,1), "
+            . "(78,61,1,REPEAT('c',64),'audio/webm',1234,2)"
         );
         $database->exec(
             'UPDATE dabing_script_lines SET selected_recording_id = 77 WHERE id = 61'
@@ -521,6 +524,83 @@ function auditLegacyUpgrade(string $host, int $port, string $rootPassword): void
         $assert(strtotime($inviteExpiry . ' UTC') <= time(),
             'A legacy delivered invite exceeded its 24-hour lifetime.');
 
+        $studio = new StudioModel($database);
+        $initialRevision = $studio->projectRevision(42, 2);
+        $assert(is_string($initialRevision),
+            'Assigned collaborator could not read the project revision.');
+        $assert($studio->setTakeHidden(42, 61, 78, 1, true),
+            'Take uploader could not hide an unselected take.');
+        $hiddenRevision = $studio->projectRevision(42, 2);
+        $assert(is_string($hiddenRevision) && $hiddenRevision !== $initialRevision,
+            'Effective take visibility change did not advance project revision.');
+        $assert($studio->setTakeHidden(42, 61, 78, 1, true),
+            'Idempotent hide retry was not accepted.');
+        $assert($studio->projectRevision(42, 2) === $hiddenRevision,
+            'Idempotent hide retry changed project revision.');
+
+        $ownerView = $studio->projectView(42, 1, 1, false, false, [], false);
+        $peerView = $studio->projectView(42, 2, 1, false, false, [], false);
+        $adminView = $studio->projectView(42, 2, 1, true, false, [], false);
+        $assert(is_array($ownerView) && is_array($peerView)
+            && is_array($adminView), 'A project view was unavailable to an expected viewer.');
+        $ownerTakes = $ownerView['chapters'][0]['lines'][0]['takes'];
+        $peerTakes = $peerView['chapters'][0]['lines'][0]['takes'];
+        $adminTakes = $adminView['chapters'][0]['lines'][0]['takes'];
+        $ownerHidden = array_values(array_filter(
+            $ownerTakes,
+            static fn (array $take): bool => $take['id'] === 78
+        ));
+        $peerHidden = array_values(array_filter(
+            $peerTakes,
+            static fn (array $take): bool => $take['id'] === 78
+        ));
+        $adminHidden = array_values(array_filter(
+            $adminTakes,
+            static fn (array $take): bool => $take['id'] === 78
+        ));
+        $assert(count($ownerHidden) === 1 && $ownerHidden[0]['hidden']
+            && $ownerHidden[0]['can_hide'] && !$ownerHidden[0]['can_delete'],
+            'Uploader could not see the hidden badge or had permanent-delete access.');
+        $assert($peerHidden === [],
+            'Hidden unselected take remained visible to another collaborator.');
+        $assert(count($adminHidden) === 1 && $adminHidden[0]['can_hide']
+            && $adminHidden[0]['can_delete'],
+            'Administrator could not view or permanently delete the hidden take.');
+        $assert($studio->recordingForUser(78, 2) === null,
+            'Hidden unselected take remained directly playable to a collaborator.');
+        $assert($studio->recordingForUser(77, 2) !== null,
+            'Selected take became unavailable to a collaborator.');
+        $assert($studio->beginTakeDeletion(42, 61, 78, 2, false) === null,
+            'Collaborator could permanently delete another take.');
+        $lockedTake = $studio->beginTakeDeletion(42, 61, 78, 1, true);
+        $assert(is_array($lockedTake),
+            'Administrator could not begin permanent take deletion.');
+        $studio->cancelTakeDeletion();
+
+        $assert($studio->selectTake(42, 61, 78, 1, true),
+            'Administrator could not select the hidden take.');
+        $selectedRevision = $studio->projectRevision(42, 2);
+        $assert(is_string($selectedRevision) && $selectedRevision !== $hiddenRevision,
+            'Effective selection change did not advance project revision.');
+        $assert(!$studio->setTakeHidden(42, 61, 78, 2, false),
+            'Collaborator could restore another user\'s hidden take.');
+        $selectedPeerView = $studio->projectView(42, 2, 1, false, false, [], false);
+        $assert(is_array($selectedPeerView)
+            && $selectedPeerView['chapters'][0]['lines'][0]['selected_recording_id'] === 78
+            && ($selectedPeerView['playlist'][0]['recording_id'] ?? null) === 78
+            && $studio->recordingForUser(78, 2) !== null,
+            'A selected hidden take stopped appearing or playing in the shared playlist.');
+        $assert($studio->setTakeHidden(42, 61, 78, 2, false, true),
+            'Administrator could not restore a hidden take.');
+        $restoredRevision = $studio->projectRevision(42, 2);
+        $assert(is_string($restoredRevision) && $restoredRevision !== $selectedRevision,
+            'Effective restore did not advance project revision.');
+        $assert($studio->setTakeHidden(42, 61, 78, 2, false, true)
+            && $studio->projectRevision(42, 2) === $restoredRevision,
+            'Idempotent restore retry changed project revision.');
+        $assert($studio->selectTake(42, 61, 77, 1, true),
+            'Administrator could not restore the original legacy selection.');
+
         $database->exec('DELETE FROM dabing_users WHERE id=1');
         $preserved = $database->query(
             'SELECT p.owner_user_id, r.user_id, r.storage_key, '
@@ -544,7 +624,8 @@ function auditLegacyUpgrade(string $host, int $port, string $rootPassword): void
             'Deleting one assigned user removed another user\'s assignment.');
         fwrite(STDOUT,
             "PASS legacy upgrade: 0.1.1 rows, take selection, multi-user role, "
-            . "24-hour invite cap, account deletion, and retry preserved.\n"
+            . "hidden-take access, project revisions, 24-hour invite cap, "
+            . "account deletion, and retry preserved.\n"
         );
     } finally {
         $admin->exec('DROP DATABASE IF EXISTS `' . $databaseName . '`');
@@ -629,19 +710,22 @@ function auditSchema(): void
     $requiredColumns = [
         'dabing_users' => ['is_active', 'session_version'],
         'dabing_email_invites' => ['delivery_error'],
-        'dabing_projects' => ['owner_user_id'],
-        'dabing_recordings' => ['user_id'],
+        'dabing_projects' => ['owner_user_id', 'revision'],
+        'dabing_recordings' => ['user_id', 'is_hidden'],
     ];
     $columnQuery = $database->prepare(
-        'SELECT COLUMN_NAME, IS_NULLABLE FROM information_schema.COLUMNS '
+        'SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_DEFAULT '
+        . 'FROM information_schema.COLUMNS '
         . 'WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table_name'
     );
     foreach ($requiredColumns as $table => $columns) {
         $columnQuery->execute(['schema' => $name, 'table_name' => $table]);
         $actualColumns = [];
         foreach ($columnQuery->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $actualColumns[(string) $row['COLUMN_NAME']] =
-                (string) $row['IS_NULLABLE'];
+            $actualColumns[(string) $row['COLUMN_NAME']] = [
+                'nullable' => (string) $row['IS_NULLABLE'],
+                'default' => $row['COLUMN_DEFAULT'],
+            ];
         }
         foreach ($columns as $column) {
             if (!array_key_exists($column, $actualColumns)) {
@@ -649,10 +733,20 @@ function auditSchema(): void
             }
         }
         if (($table === 'dabing_projects'
-                && $actualColumns['owner_user_id'] !== 'YES')
+                && $actualColumns['owner_user_id']['nullable'] !== 'YES')
             || ($table === 'dabing_recordings'
-                && $actualColumns['user_id'] !== 'YES')) {
+                && $actualColumns['user_id']['nullable'] !== 'YES')) {
             fail('Schema smoke found author-preserving columns that are not nullable.');
+        }
+        foreach ([
+            'revision' => '0',
+            'is_hidden' => '0',
+        ] as $column => $default) {
+            if (isset($actualColumns[$column])
+                && (string) $actualColumns[$column]['default'] !== $default) {
+                fail('Schema smoke found an unexpected default for '
+                    . $table . '.' . $column . '.');
+            }
         }
     }
     $foreignKeys = $database->query(

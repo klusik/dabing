@@ -83,12 +83,19 @@ $routes = [
     'email-invite' => ['POST'], 'email-join' => ['GET', 'POST'],
     'update' => ['GET', 'POST'],
     'select-take' => ['POST'], 'upload' => ['POST'],
-    'delete-take' => ['POST'], 'audio' => ['GET', 'HEAD'],
+    'delete-take' => ['POST'], 'hide-take' => ['POST'],
+    'audio' => ['GET', 'HEAD'],
     'export-book' => ['GET'],
 ];
 $route = Http::query('route');
 $route = $route === '' ? 'projects' : $route;
 $method = Http::method();
+$jsonEndpoint = Http::wantsJson()
+    || ($route === 'project' && Http::query('view') === 'revision');
+$jsonResponse = $jsonEndpoint && in_array($route, [
+    'project', 'assign-voice', 'email-invite', 'select-take',
+    'delete-take', 'hide-take',
+], true);
 
 try {
     if (!isset($routes[$route])) {
@@ -153,6 +160,9 @@ try {
         if ($route === 'upload') {
             Http::json(['ok' => false, 'message' => 'Přihlášení vypršelo.'], 401);
         }
+        if ($jsonResponse) {
+            Http::json(['ok' => false, 'message' => 'Přihlášení vypršelo.'], 401);
+        }
         Http::redirect('login');
     }
 
@@ -191,6 +201,9 @@ try {
         case 'delete-take':
             $studio->deleteTake();
             break;
+        case 'hide-take':
+            $studio->hideTake();
+            break;
         case 'audio':
             $studio->audio();
             break;
@@ -204,6 +217,9 @@ try {
     if ($route === 'upload') {
         Http::json(['ok' => false, 'message' => $error->getMessage()], $error->status());
     }
+    if ($jsonResponse) {
+        Http::json(['ok' => false, 'message' => $error->getMessage()], $error->status());
+    }
     Http::render('error', 'Chyba', [
         'status' => $error->status(), 'message' => $error->getMessage(),
     ], isset($user) && is_array($user) ? $user : null, $error->status());
@@ -214,6 +230,12 @@ try {
     ));
     if ($route === 'upload') {
         Http::json(['ok' => false, 'message' => 'Požadavek se nepodařilo zpracovat.'], 500);
+    }
+    if ($jsonResponse) {
+        Http::json([
+            'ok' => false,
+            'message' => 'Požadavek se nepodařilo zpracovat.',
+        ], 500);
     }
     Http::render('error', 'Chyba', [
         'status' => 500, 'message' => 'Požadavek se nepodařilo zpracovat.',
