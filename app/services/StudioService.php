@@ -145,10 +145,10 @@ final class StudioService
      * @param int $projectId Project containing the take.
      * @param int $lineId Script line containing the take.
      * @param int $recordingId Take selected for removal.
-     * @param int $userId Authenticated owner or take creator.
+     * @param int $userId Authenticated administrator.
      * @param bool $isAdmin Whether the requester has global administrator access.
      * @return void No value is returned.
-     * @throws FormError When the take is missing or the requester cannot delete it.
+     * @throws FormError When the take is missing or the requester is not an administrator.
      */
     public function deleteTake(
         int $projectId,
@@ -178,6 +178,36 @@ final class StudioService
             $this->cleanupPendingFiles();
         } catch (\Throwable) {
             // A committed deletion stays successful; retained pending files are retryable.
+        }
+    }
+
+    /** Hide or restore a take for collaborators while retaining its private file.
+     * @param int $projectId Project containing the take.
+     * @param int $lineId Script line containing the take.
+     * @param int $recordingId Target take identifier.
+     * @param int $userId Authenticated requester.
+     * @param bool $hidden Whether collaborators should not see the unselected take.
+     * @param bool $isAdmin Whether the requester has global administrator access.
+     * @return void No value is returned.
+     * @throws FormError When the take is missing or the requester cannot change its visibility.
+     */
+    public function setTakeHidden(
+        int $projectId,
+        int $lineId,
+        int $recordingId,
+        int $userId,
+        bool $hidden,
+        bool $isAdmin = false
+    ): void {
+        if (!$this->model->setTakeHidden(
+            $projectId,
+            $lineId,
+            $recordingId,
+            $userId,
+            $hidden,
+            $isAdmin
+        )) {
+            throw new FormError('K viditelnosti tohoto pokusu nemáte oprávnění.');
         }
     }
 

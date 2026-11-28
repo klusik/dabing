@@ -37,6 +37,7 @@ final class EmailInviteController
             throw new HttpError(405, 'Metoda není povolena.');
         }
         Http::requireCsrf();
+        $wantsJson = Http::wantsJson();
         $projectId = Http::queryId('id');
         if ($projectId === null) {
             throw new HttpError(404, 'Kniha nebyla nalezena.');
@@ -94,14 +95,24 @@ final class EmailInviteController
                 throw new FormError('Požadavek na pozvánku není platný.');
             }
         } catch (FormError $error) {
+            if ($wantsJson) {
+                Http::json([
+                    'ok' => false,
+                    'message' => $error->getMessage(),
+                ], 422);
+            }
             Http::notice('error', $error->getMessage());
             Http::redirect('project', ['id' => $projectId]);
         }
-        Http::notice('success', $successMessage ?? match ($action) {
+        $message = $successMessage ?? match ($action) {
             'cancel' => 'Pozvánka byla zrušena.',
             'resend' => 'Pozvánka byla znovu odeslána.',
             default => 'E-mailová pozvánka byla odeslána.',
-        });
+        };
+        if ($wantsJson) {
+            Http::json(['ok' => true, 'message' => $message]);
+        }
+        Http::notice('success', $message);
         Http::redirect('project', ['id' => $projectId]);
     }
 

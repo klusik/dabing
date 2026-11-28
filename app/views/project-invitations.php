@@ -23,7 +23,7 @@ $canChooseAccount = !empty($data['is_admin']);
 $inviteProjectId = (int) ($project['id'] ?? 0);
 ?>
 <div class="invite-email-tools">
-    <form method="post" action="?route=email-invite&amp;id=<?= $inviteProjectId ?>" class="stack-form">
+    <form method="post" action="?route=email-invite&amp;id=<?= $inviteProjectId ?>" class="stack-form" data-project-async>
         <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
         <input type="hidden" name="action" value="send">
         <?php if ($canChooseAccount): ?>
@@ -85,14 +85,14 @@ $inviteProjectId = (int) ($project['id'] ?? 0);
                 </div>
                 <?php if (in_array($invite['state'], ['sent', 'pending', 'failed', 'expired'], true)): ?>
                     <div class="invite-email-actions">
-                        <form method="post" action="?route=email-invite&amp;id=<?= $inviteProjectId ?>">
+                        <form method="post" action="?route=email-invite&amp;id=<?= $inviteProjectId ?>" data-project-async>
                             <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
                             <input type="hidden" name="action" value="resend">
                             <input type="hidden" name="invite_id" value="<?= (int) $invite['id'] ?>">
                             <button class="button button-quiet" type="submit">Poslat znovu</button>
                         </form>
                         <?php if (in_array($invite['state'], ['sent', 'pending'], true)): ?>
-                            <form method="post" action="?route=email-invite&amp;id=<?= $inviteProjectId ?>">
+                            <form method="post" action="?route=email-invite&amp;id=<?= $inviteProjectId ?>" data-project-async>
                                 <input type="hidden" name="csrf" value="<?= Http::escape(Http::csrf()) ?>">
                                 <input type="hidden" name="action" value="cancel">
                                 <input type="hidden" name="invite_id" value="<?= (int) $invite['id'] ?>">

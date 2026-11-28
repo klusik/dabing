@@ -49,6 +49,15 @@ Starší relace s platným otiskem hesla se proto zachovají. Každá následná
 deaktivace účtu nebo správcovský reset hesla zvýší verzi relace a zneplatní
 všechny starší relace, i pokud je účet znovu aktivován před jejich použitím.
 
+### Aktualizace z verze 0.2.2
+
+Před aktualizací zálohujte databázi a úložiště. Nainstalujte vydání 0.3.0
+přes **Aktualizace**. Updater aplikuje migraci
+`0002_hidden_takes_and_project_revisions.php`, která přidá stav skrytí pokusu
+a revizi knihy pro živé obnovování zobrazení. Pokud běžný databázový účet
+nemůže měnit schéma, zadejte účet s oprávněním DDL do pole
+**Databázová oprávnění**.
+
 ## Scénář
 
 U importu otevřete `?` a použijte ukázku nebo zkopírujte pokyny. Vlastní
@@ -113,9 +122,10 @@ Každou postavu může nahrávat více lidí a jeden člověk může mít někol
 Předem vybrané role se přidělí při přijetí pozvánky. Správce může obsazení
 měnit kliknutím na buňku v matici **Obsazení** nebo ve správě uživatelů.
 Kniha se spolupracovníkovi zobrazí po přiřazení první role. Má přístup k celému
-scénáři i všem pokusům. Nahrávat může vlastní role a filtr **Moje repliky** mu
-ukáže jejich text. Po odebrání poslední role ztratí přístup od dalšího požadavku.
-Správce může otevřít každou knihu a nahrávat všechny repliky.
+scénáři a k viditelným pokusům. Nahrávat může vlastní role a filtr
+**Moje repliky** mu ukáže jejich text. Po odebrání poslední role ztratí přístup
+od dalšího požadavku. Správce může otevřít každou knihu a nahrávat všechny
+repliky.
 
 Odstranění účtu smaže jeho přiřazení postav. Záznamy a knihy zůstanou zachované;
 jejich odkazy na uživatele se nastaví na prázdnou hodnotu. Dabing nemaže ani
@@ -127,10 +137,25 @@ pro první repliku názvy `o_pejskovi_0001_001.mp3` a
 `o_pejskovi_0001_002.mp3`. Jednotlivé názvy jsou uvedené u nahrávek a
 použijí se také při stažení do počítače.
 
-Správce může odstranit libovolný pokus. Spolupracovník s přístupem ke knize
-může odstranit svůj vlastní pokus. Při odstranění
-vybraného pokusu se vybere nejnižší zbývající číslo. Číslování již uložených
-pokusů zůstává. Nový pokus dostane číslo za nejvyšším dosavadním.
+Autor knihy nebo správce může skrýt libovolný pokus a později ho znovu zobrazit.
+Autor nahrávky může skrýt a obnovit svůj vlastní pokus. Skryté pokusy jsou
+označené a správce i autor nahrávky je mohou zobrazit a obnovit. Ostatní
+spolupracovníci skrytý pokus neuvidí. Vybraný skrytý pokus ale zůstává viditelný,
+lze ho přehrát a zůstává v exportu.
+
+Pokus může trvale odstranit pouze správce. Při odstranění vybraného pokusu
+se vybere nejnižší zbývající číslo. Číslování již uložených pokusů zůstává;
+nový pokus dostane číslo za nejvyšším dosavadním.
+
+Správce i spolupracovník s přístupem ke knize mohou filtrovat podle několika
+postav najednou. Bez vybraných postav se zobrazí všechny repliky. Filtr nemění
+právo k nahrávání; spolupracovník může nahrávat pouze přiřazené role.
+Stránkování je ve výchozím nastavení
+vypnuté; jeho volba se ukládá pro knihu, účet a prohlížeč. Dabing průběžně
+obnovuje zobrazení při nahrání pokusu, změně vybraného záběru nebo jeho skrytí
+a při změně obsazení. Text scénáře se živě neobnovuje.
+Filtr řadí postavy abecedně. U každé ukazuje přiřazená jména, počet replik
+a počet nadabovaných replik s platným vybraným pokusem.
 
 Při mazání se soubor nejprve přesune do neveřejného adresáře
 `storage/recordings/pending`. Pokud databázová transakce skončí chybou, soubor
@@ -142,6 +167,8 @@ neodkazuje.
 
 První záběr se použije automaticky a správce může vybrat jiný. Poslech
 přehraje vybrané repliky ve scénářovém pořadí a přeskočí prázdná místa.
+Šipka u položky spustí přehrávání. Kliknutí na její číslo nebo postavu přejde
+k replice a při zapnutém stránkování otevře správnou stránku bez spuštění zvuku.
 Při nahrávání bliká REC a ukazatel reaguje na úroveň mikrofonu. Po stisknutí
 Stop se záznam v prohlížeči rovnou převede na MP3 a uloží. Stejně se zpracuje
 vybraný zvukový soubor. Po chybě zůstane zvuk v otevřené kartě pro další
@@ -219,16 +246,16 @@ schváleným postupem, který respektuje ochrany větve. Ověřte přesný commi
 `origin/main` a z něj sestavte balík mimo pracovní kopii.
 
 ```sh
-php scripts/build-update.php 0.2.2 ../dabing-0.2.2.zip
+php scripts/build-update.php 0.3.0 ../dabing-0.3.0.zip
 ```
 
-Balík `dabing-0.2.2.zip` patří jako asset ke stabilnímu vydání s přesným tagem
-`0.2.2` v `klusik/dabing`. Updater přijímá také značku `v` před verzí.
+Balík `dabing-0.3.0.zip` patří jako asset ke stabilnímu vydání s přesným tagem
+`0.3.0` v `klusik/dabing`. Updater přijímá také značku `v` před verzí.
 Po schválení vydání označte ověřený commit `origin/main` a odešlete tag.
 
 ```sh
-git tag 0.2.2 origin/main
-git push origin refs/tags/0.2.2
+git tag 0.3.0 origin/main
+git push origin refs/tags/0.3.0
 ```
 Verze balíku musí odpovídat tagu a GitHub musí k assetu uvádět kontrolní součet
 SHA-256. Archiv má jediný kořen

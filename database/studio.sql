@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS dabing_projects (
     owner_user_id INT UNSIGNED NULL,
     title VARCHAR(200) NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     KEY idx_dabing_projects_owner (owner_user_id),
     CONSTRAINT fk_dabing_projects_owner
@@ -87,6 +88,7 @@ CREATE TABLE IF NOT EXISTS dabing_recordings (
     byte_size INT UNSIGNED NOT NULL,
     attempt_no SMALLINT UNSIGNED NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    is_hidden TINYINT(1) NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     UNIQUE KEY uq_dabing_recording_line_attempt (line_id, attempt_no),
     UNIQUE KEY uq_dabing_recording_storage_key (storage_key),

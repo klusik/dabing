@@ -71,3 +71,10 @@ snazšímu ověření.
   jasnou hierarchii akcí, čitelný focus a pohodlné mobilní cíle. Kontextový
   panel kotvi k jeho ovladači a umožni zavření přes Escape i kliknutí mimo.
   Každou změnu UI ověř na desktopu i v úzkém viewportu.
+
+## Pracovní model
+
+- Pro psaní kódu používej 6-luna-low, pro webové QA v interním Codex browseru
+  6.1-terra-medium. Hlavní agent koordinuje práci.
+- Šetři tokeny a kredity. Pro běžné kontroly Git/GitHub používej jednoduché
+  nástroje a levné kontroly místo sol-max.

@@ -35,6 +35,22 @@ const MP3_WORKER_PATH = './public/assets/mp3-worker.js';
 let activeCaptureCard = null;
 let interruptedCaptureCard = null;
 let savedPageNeedsRefresh = false;
+const boundPanelTriggers = new WeakSet();
+const boundRecorders = new WeakSet();
+const playlistStates = new WeakMap();
+/** @type {WeakMap<HTMLElement,{url:string,historyMode:'push'|'replace'|'none',force:boolean}>} */
+const queuedProjectRefreshes = new WeakMap();
+
+/**
+ * Bound revision polling for one visible book workspace.
+ * Type: number.
+ * Units: milliseconds.
+ * Scope: one visible authenticated project view.
+ * Consumers: the non-overlapping project revision poller.
+ * Rationale: detect shared changes promptly without frequent HTML transfers.
+ * Value: 1800 milliseconds between completed revision checks.
+ */
+const PROJECT_POLL_INTERVAL_MS = 1800;
 
 /**
  * Take-token entropy policy.
@@ -139,72 +155,132 @@ const RECORDING_MIME_TYPES = [
  * @param {HTMLElement} panel - The contextual panel to show or hide.
  * @returns {void} This function updates panel visibility and ARIA state.
  */
-function bindPanel(trigger, panel) {
-    const close = () => {
-        panel.hidden = true;
-        panel.classList.remove('is-viewport-positioned');
-        panel.style.left = '';
-        panel.style.top = '';
-        panel.style.maxHeight = '';
-        trigger.setAttribute('aria-expanded', 'false');
-    };
-    const positionViewportPanel = () => {
-        if (panel.hidden || !panel.matches(
-            '.cast-popover, .invite-popover, .users-popover'
-        )) return;
-        const edge = 12;
-        panel.style.maxHeight = `${Math.max(120, window.innerHeight - edge * 2)}px`;
-        const anchor = trigger.getBoundingClientRect();
-        const bounds = panel.getBoundingClientRect();
-        const left = Math.max(
-            edge,
-            Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - edge)
-        );
-        const below = anchor.bottom + 8;
-        const top = below + bounds.height <= window.innerHeight - edge
-            ? below
-            : Math.max(edge, anchor.top - bounds.height - 8);
-        panel.style.left = `${left}px`;
-        panel.style.top = `${top}px`;
-        panel.classList.add('is-viewport-positioned');
-    };
-    panel.querySelectorAll('[data-panel-close]').forEach((button) => {
-        button.addEventListener('click', () => {
-            close();
-            trigger.focus();
-        });
+/**
+ * Close one contextual panel and restore its unpositioned anchored style.
+ * @param {HTMLElement} panel - The panel to close.
+ * @param {?HTMLElement} trigger - Its controlling button, when still present.
+ * @returns {void} The panel is hidden and its trigger reports the closed state.
+ */
+function closePanel(panel, trigger) {
+    panel.hidden = true;
+    panel.classList.remove('is-viewport-positioned');
+    panel.style.left = '';
+    panel.style.top = '';
+    panel.style.maxHeight = '';
+    panel.style.maxWidth = '';
+    trigger?.setAttribute('aria-expanded', 'false');
+}
+
+/**
+ * Position an open contextual panel inside the viewport while retaining its anchor.
+ * @param {HTMLElement} trigger - The button controlling the panel.
+ * @param {HTMLElement} panel - The panel to position.
+ * @returns {void} Oversized panels receive a bounded viewport position.
+ */
+function positionPanel(trigger, panel) {
+    if (panel.hidden || !panel.matches(
+        '.cast-popover, .invite-popover, .users-popover, .character-filter-popover'
+    )) return;
+    const edge = 12;
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+    panel.style.maxWidth = `${Math.max(0, viewportWidth - edge * 2)}px`;
+    panel.style.maxHeight = `${Math.max(120, window.innerHeight - edge * 2)}px`;
+    const anchor = trigger.getBoundingClientRect();
+    const bounds = panel.getBoundingClientRect();
+    const left = Math.max(
+        edge,
+        Math.min(anchor.right - bounds.width, viewportWidth - bounds.width - edge)
+    );
+    const below = anchor.bottom + 8;
+    const top = below + bounds.height <= window.innerHeight - edge
+        ? below
+        : Math.max(edge, anchor.top - bounds.height - 8);
+    panel.style.left = `${left}px`;
+    panel.style.top = `${top}px`;
+    panel.classList.add('is-viewport-positioned');
+}
+
+/**
+ * Position every currently open panel after viewport movement or resize.
+ * @returns {void} Open viewport panels remain aligned with their triggers.
+ */
+function positionOpenPanels() {
+    document.querySelectorAll('[data-panel]:not([hidden])').forEach((panel) => {
+        const trigger = Array.from(document.querySelectorAll('[data-panel-trigger]'))
+            .find((candidate) => candidate.getAttribute('aria-controls') === panel.id);
+        if (trigger) positionPanel(trigger, panel);
     });
+}
+
+let panelDocumentHandlersBound = false;
+
+/**
+ * Bind one trigger to the shared accessible panel lifecycle.
+ * @param {HTMLElement} trigger - The button controlling this panel.
+ * @param {HTMLElement} panel - The contextual panel to show or hide.
+ * @returns {void} The panel supports outside click, Escape, and viewport positioning.
+ */
+function bindPanel(trigger, panel) {
+    if (boundPanelTriggers.has(trigger)) return;
+    boundPanelTriggers.add(trigger);
+    if (!panelDocumentHandlersBound) {
+        panelDocumentHandlersBound = true;
+        document.addEventListener('click', (event) => {
+            const target = event.target;
+            if (!(target instanceof Node)) return;
+            document.querySelectorAll('[data-panel]:not([hidden])').forEach((openPanel) => {
+                const openTrigger = Array.from(
+                    document.querySelectorAll('[data-panel-trigger]')
+                ).find((candidate) => candidate.getAttribute('aria-controls') === openPanel.id);
+                if (openPanel.contains(target) || openTrigger?.contains(target)) return;
+                closePanel(openPanel, openTrigger ?? null);
+            });
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key !== 'Escape') return;
+            const openPanel = document.querySelector('[data-panel]:not([hidden])');
+            if (!openPanel) return;
+            const openTrigger = Array.from(
+                document.querySelectorAll('[data-panel-trigger]')
+            ).find((candidate) => candidate.getAttribute('aria-controls') === openPanel.id);
+            closePanel(openPanel, openTrigger ?? null);
+            openTrigger?.focus();
+        });
+        window.addEventListener('resize', positionOpenPanels);
+        window.addEventListener('scroll', positionOpenPanels, true);
+    }
     trigger.addEventListener('click', (event) => {
         event.stopPropagation();
         const willOpen = panel.hidden;
-        document.querySelectorAll('[data-panel]').forEach((openPanel) => {
-            openPanel.hidden = true;
-            openPanel.classList.remove('is-viewport-positioned');
-            openPanel.style.left = '';
-            openPanel.style.top = '';
-            openPanel.style.maxHeight = '';
-            const openTrigger = document.querySelector(
-                `[aria-controls="${openPanel.id}"]`
-            );
-            if (openTrigger) openTrigger.setAttribute('aria-expanded', 'false');
+        document.querySelectorAll('[data-panel]:not([hidden])').forEach((openPanel) => {
+            const openTrigger = Array.from(
+                document.querySelectorAll('[data-panel-trigger]')
+            ).find((candidate) => candidate.getAttribute('aria-controls') === openPanel.id);
+            closePanel(openPanel, openTrigger ?? null);
         });
         panel.hidden = !willOpen;
         trigger.setAttribute('aria-expanded', String(willOpen));
-        if (willOpen) positionViewportPanel();
+        if (willOpen) positionPanel(trigger, panel);
     });
-    panel.addEventListener('click', (event) => event.stopPropagation());
-    document.addEventListener('click', (event) => {
-        if (!panel.hidden && !panel.contains(event.target)) close();
-    });
-    document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && !panel.hidden) {
-            close();
+    panel.querySelectorAll('[data-panel-close]').forEach((button) => {
+        button.addEventListener('click', () => {
+            closePanel(panel, trigger);
             trigger.focus();
-        }
+        });
     });
-    window.addEventListener('resize', positionViewportPanel);
-    window.addEventListener('scroll', positionViewportPanel, true);
-    if (!panel.hidden) positionViewportPanel();
+    if (!panel.hidden) positionPanel(trigger, panel);
+}
+
+/**
+ * Bind panel triggers in a newly inserted subtree without adding duplicate listeners.
+ * @param {ParentNode} root - The document or newly inserted DOM subtree.
+ * @returns {void} Every available trigger uses the shared panel lifecycle.
+ */
+function bindPanelTriggers(root) {
+    root.querySelectorAll('[data-panel-trigger]').forEach((trigger) => {
+        const panel = document.getElementById(trigger.getAttribute('aria-controls'));
+        if (panel) bindPanel(trigger, panel);
+    });
 }
 
 /**
@@ -305,6 +381,7 @@ function bindCastMatrix(matrix) {
                 toggle.value = assigned ? '0' : '1';
             }
             if (status) status.textContent = result.message;
+            window.dispatchEvent(new Event('dabing:project-refresh'));
         } catch (error) {
             if (status) {
                 status.textContent = error instanceof Error
@@ -547,7 +624,12 @@ async function uploadRecording(card, pending, status, button) {
         requestSent = true;
         const response = await fetch(
             `?route=upload&id=${encodeURIComponent(projectId)}`,
-            { method: 'POST', body: form, credentials: 'same-origin' }
+            {
+                method: 'POST',
+                body: form,
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+            }
         );
         responseReceived = true;
         let result;
@@ -573,7 +655,8 @@ async function uploadRecording(card, pending, status, button) {
         if (line?.id) {
             window.history.replaceState(null, '', '#' + encodeURIComponent(line.id));
         }
-        window.setTimeout(() => window.location.reload(), 500);
+        setCaptureOwner(null);
+        window.dispatchEvent(new Event('dabing:project-refresh'));
     } catch (error) {
         const rawMessage = error instanceof Error
             ? error.message
@@ -600,6 +683,7 @@ async function uploadRecording(card, pending, status, button) {
                 }
                 status.textContent = 'Nahrávka zahozena.';
                 setCaptureOwner(null);
+                window.dispatchEvent(new Event('dabing:project-refresh'));
             }
         );
     } finally {
@@ -822,7 +906,12 @@ function bindRecorder(card) {
     window.addEventListener('pageshow', (event) => {
         if (!event.persisted) return;
         disposed = false;
-        if (savedPageNeedsRefresh || !recordingInterruptedByPagehide
+        if (savedPageNeedsRefresh) {
+            savedPageNeedsRefresh = false;
+            window.dispatchEvent(new Event('dabing:project-refresh'));
+            return;
+        }
+        if (!recordingInterruptedByPagehide
             || interruptedCaptureCard !== card || activeCaptureCard !== card) return;
         recordingInterruptedByPagehide = false;
         interruptedCaptureCard = null;
@@ -970,15 +1059,9 @@ function bindJsonGuidance(disclosure) {
         }
     });
 }
-document.querySelectorAll('[data-panel-trigger]').forEach((trigger) => {
-    const panel = document.getElementById(trigger.getAttribute('aria-controls'));
-    if (panel) {
-        bindPanel(trigger, panel);
-        if (trigger.dataset.open === 'true') trigger.click();
-    }
-});
+bindPanelTriggers(document);
 document.querySelectorAll('[data-cast-matrix]').forEach(bindCastMatrix);
-document.querySelectorAll('[data-recorder]').forEach(bindRecorder);
+bindRecorderNodes(document);
 document.querySelectorAll('[data-fill-example]').forEach((button) => {
     button.addEventListener('click', () => fillExampleScript(button));
 });
@@ -1047,48 +1130,786 @@ function bindScriptImport(form) {
  * Play selected takes as one ordered audiobook and support manual next/previous.
  * @returns {void} The selected clips play in script order through one audio element.
  */
+let playlistDocumentHandlersBound = false;
+
+/**
+ * Play selected takes while retaining the stable player across project refreshes.
+ * @returns {void} Delegated playlist controls preserve the current audio element and time.
+ */
 function bindPlaylist() {
     const player = document.querySelector('[data-story-player]');
-    const items = Array.from(document.querySelectorAll('[data-play-item]'));
-    const status = document.querySelector('[data-playlist-status]');
-    const next = document.querySelector('[data-play-next]');
-    const previous = document.querySelector('[data-play-previous]');
-    if (!player || items.length === 0) {
-        if (next) next.disabled = true;
-        if (previous) previous.disabled = true;
-        return;
+    if (!(player instanceof HTMLAudioElement)) return;
+    let state = playlistStates.get(player);
+    if (!state) {
+        state = { currentId: '', currentIndex: -1, initialized: false };
+        playlistStates.set(player, state);
     }
-    let current = 0;
+    const items = () => Array.from(document.querySelectorAll('[data-play-item]'));
+    const status = () => document.querySelector('[data-playlist-status]');
+    const scrollToPlaylistLine = (item) => {
+        const lineId = item.dataset.playLineId ?? '';
+        if (!lineId) return;
+        const root = document.querySelector('[data-project-live]');
+        const line = document.getElementById(`line-${lineId}`);
+        if (line && root?.contains(line)) {
+            line.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            return;
+        }
+        if (!root) return;
+        const baseUrl = root.dataset.pendingNavigationUrl
+            || root.dataset.lastUrl
+            || window.location.href;
+        const target = new URL(baseUrl, window.location.href);
+        if (item.dataset.playInFilter !== '1') {
+            target.searchParams.delete('filter');
+            target.searchParams.delete('characters[]');
+        }
+        target.searchParams.set('page', item.dataset.playLinePage ?? '1');
+        root.dataset.pendingPlaylistLineId = lineId;
+        void refreshProjectView(root, target.href, 'push', true);
+    };
     const playIndex = (index, shouldPlay) => {
-        if (index < 0 || index >= items.length) return;
-        current = index;
-        const item = items[current];
+        const currentItems = items();
+        if (index < 0 || index >= currentItems.length) return;
+        const item = currentItems[index];
+        state.currentIndex = index;
+        state.currentId = item.dataset.recordingId ?? item.dataset.src ?? '';
         player.src = item.dataset.src ?? '';
         player.load();
-        if (status) status.textContent = item.dataset.label ?? 'Vybraná replika';
-        items.forEach((button, buttonIndex) => {
-            button.setAttribute('aria-current', buttonIndex === current ? 'true' : 'false');
+        const currentStatus = status();
+        if (currentStatus) {
+            currentStatus.textContent = item.dataset.label ?? 'Vybraná replika';
+        }
+        currentItems.forEach((button, buttonIndex) => {
+            button.setAttribute(
+                'aria-current', String(buttonIndex === state.currentIndex)
+            );
         });
         if (shouldPlay) {
             player.play().catch(() => {
-                if (status) status.textContent = 'Přehrávání se nepodařilo spustit. Zkuste tlačítko přehrávání.';
+                const message = status();
+                if (message) {
+                    message.textContent = 'Přehrávání se nepodařilo spustit. Zkuste tlačítko přehrávání.';
+                }
             });
         }
     };
-    items.forEach((item, index) => {
-        item.addEventListener('click', () => playIndex(index, true));
+    if (!player.dataset.playlistBound) {
+        player.dataset.playlistBound = 'true';
+        player.addEventListener('ended', () => {
+            const currentItems = items();
+            if (state.currentIndex >= 0
+                && state.currentIndex + 1 < currentItems.length) {
+                playIndex(state.currentIndex + 1, true);
+            } else if (status()) {
+                status().textContent = 'Přehrávání skončilo.';
+            }
+        });
+    }
+    if (!playlistDocumentHandlersBound) {
+        playlistDocumentHandlersBound = true;
+        document.addEventListener('click', (event) => {
+            if (!(event.target instanceof Element)) return;
+            const jump = event.target.closest('[data-play-jump]');
+            if (jump) {
+                scrollToPlaylistLine(jump);
+                return;
+            }
+            const item = event.target.closest('[data-play-item]');
+            const activePlayer = document.querySelector('[data-story-player]');
+            if (!(activePlayer instanceof HTMLAudioElement)) return;
+            const activeState = playlistStates.get(activePlayer);
+            if (!activeState) return;
+            const currentItems = items();
+            if (item) {
+                playIndex(currentItems.indexOf(item), true);
+                return;
+            }
+            if (event.target.closest('[data-play-next]')) {
+                playIndex((activeState.currentIndex + 1) % currentItems.length, true);
+            } else if (event.target.closest('[data-play-previous]')) {
+                playIndex(
+                    (activeState.currentIndex + currentItems.length - 1)
+                        % currentItems.length,
+                    true
+                );
+            }
+        });
+    }
+    const currentItems = items();
+    const currentIndex = currentItems.findIndex((item) =>
+        (item.dataset.recordingId ?? item.dataset.src ?? '') === state.currentId
+    );
+    if (state.initialized) {
+        state.currentIndex = currentIndex;
+        currentItems.forEach((item, index) => {
+            item.setAttribute('aria-current', String(index === currentIndex));
+        });
+    } else if (currentItems.length > 0) {
+        state.initialized = true;
+        playIndex(0, false);
+    }
+    document.querySelectorAll('[data-play-next], [data-play-previous]')
+        .forEach((button) => {
+            button.disabled = currentItems.length === 0;
+        });
+}
+
+/**
+ * Bind recorder controls once, including controls inserted after a live refresh.
+ * @param {ParentNode} root - The document or refreshed project subtree.
+ * @returns {void} Each recorder retains one capture lifecycle.
+ */
+function bindRecorderNodes(root) {
+    root.querySelectorAll('[data-recorder]').forEach((recorder) => {
+        if (boundRecorders.has(recorder)) return;
+        boundRecorders.add(recorder);
+        bindRecorder(recorder);
     });
-    if (next) next.addEventListener('click', () => playIndex((current + 1) % items.length, true));
-    if (previous) previous.addEventListener('click', () => playIndex((current + items.length - 1) % items.length, true));
-    player.addEventListener('ended', () => {
-        if (current + 1 < items.length) playIndex(current + 1, true);
-        else if (status) status.textContent = 'Přehrávání skončilo.';
+}
+
+/**
+ * Announce a project action or refresh status in its persistent live region.
+ * @param {HTMLElement} root - The project view containing the status target.
+ * @param {string} message - Short user-facing status text.
+ * @returns {void} The project status region receives the message.
+ */
+function setProjectStatus(root, message) {
+    const status = root.querySelector('[data-project-status]');
+    if (status) status.textContent = message;
+}
+
+/**
+ * Detect active per-take playback that must stay attached during a DOM patch.
+ * @returns {boolean} True while a line-level audio player is actively playing.
+ */
+function hasActiveLinePlayback() {
+    return Array.from(document.querySelectorAll('[data-take-audio]'))
+        .some((audio) => !audio.paused && !audio.ended);
+}
+
+/**
+ * Refresh deferred project markup once preserved take playback has stopped.
+ * @param {HTMLElement} root - The persistent project root.
+ * @param {ParentNode} content - Initial or newly inserted project content.
+ * @returns {void} Playing take elements remain intact until a safe refresh point.
+ */
+function bindDeferredAudioRefresh(root, content) {
+    content.querySelectorAll('[data-take-audio]').forEach((audio) => {
+        if (audio.dataset.refreshListenerBound === 'true') return;
+        audio.dataset.refreshListenerBound = 'true';
+        const checkForRefresh = () => {
+            if (root.dataset.refreshDeferred === 'true'
+                && !activeCaptureCard && !hasActiveLinePlayback()) {
+                window.dispatchEvent(new Event('dabing:project-refresh'));
+            }
+        };
+        audio.addEventListener('pause', checkForRefresh);
+        audio.addEventListener('ended', checkForRefresh);
     });
-    playIndex(0, false);
+}
+
+/**
+ * Move stateful controls from existing lines into matching fresh server markup.
+ * @param {HTMLElement} current - The currently displayed project content.
+ * @param {HTMLElement} next - Parsed server-rendered project content.
+ * @returns {void} Recorder, audio and anchored-panel nodes keep their browser state.
+ */
+function preserveProjectLineControls(current, next) {
+    const oldLines = new Map(Array.from(
+        current.querySelectorAll('[data-line-card]')
+    ).map((line) => [line.dataset.lineId, line]));
+    const oldAudios = new Map(Array.from(
+        current.querySelectorAll('[data-take-audio]')
+    ).map((audio) => [audio.dataset.takeAudio, audio]));
+    const oldPanels = new Map(Array.from(
+        current.querySelectorAll('[data-panel]')
+    ).map((panel) => [panel.id, panel.closest('.anchored-control')]));
+
+    next.querySelectorAll('[data-line-card]').forEach((line) => {
+        const oldLine = oldLines.get(line.dataset.lineId);
+        if (!oldLine) return;
+        const oldRecorder = oldLine.querySelector('[data-recorder]');
+        const newRecorder = line.querySelector('[data-recorder]');
+        if (oldRecorder && newRecorder) newRecorder.replaceWith(oldRecorder);
+        line.querySelectorAll('[data-take-audio]').forEach((audio) => {
+            const oldAudio = oldAudios.get(audio.dataset.takeAudio);
+            if (oldAudio) {
+                oldAudio.setAttribute(
+                    'aria-label', audio.getAttribute('aria-label') ?? ''
+                );
+                audio.replaceWith(oldAudio);
+            }
+        });
+        line.querySelectorAll('[data-panel]').forEach((panel) => {
+            const oldControl = oldPanels.get(panel.id);
+            const newControl = panel.closest('.anchored-control');
+            if (oldControl && newControl) newControl.replaceWith(oldControl);
+        });
+    });
+}
+
+/**
+ * Synchronize persistent toolbars and panels from a parsed project page.
+ * @param {HTMLElement} current - The live project root.
+ * @param {HTMLElement} next - The parsed project root.
+ * @returns {void} Static controls reflect server data without losing panel state.
+ */
+function syncProjectShell(current, next) {
+    const currentMembers = current.querySelector('[data-project-members]');
+    const nextMembers = next.querySelector('[data-project-members]');
+    if (currentMembers && nextMembers) currentMembers.innerHTML = nextMembers.innerHTML;
+
+    const currentSummary = current.querySelector('.studio-summary');
+    const nextSummary = next.querySelector('.studio-summary');
+    if (currentSummary && nextSummary) currentSummary.replaceWith(nextSummary);
+
+    const currentFilters = Array.from(
+        current.querySelectorAll('.script-filter a[data-project-nav]')
+    );
+    const nextFilters = Array.from(
+        next.querySelectorAll('.script-filter a[data-project-nav]')
+    );
+    currentFilters.forEach((link, index) => {
+        const fresh = nextFilters[index];
+        if (!fresh) return;
+        link.href = fresh.href;
+        link.className = fresh.className;
+        if (fresh.hasAttribute('aria-current')) {
+            link.setAttribute('aria-current', fresh.getAttribute('aria-current'));
+        } else {
+            link.removeAttribute('aria-current');
+        }
+    });
+
+    const currentCharacters = current.querySelector('.character-filter-cells');
+    const nextCharacters = next.querySelector('.character-filter-cells');
+    if (currentCharacters && nextCharacters) {
+        const nextSelected = new Map(Array.from(
+            nextCharacters.querySelectorAll('[data-character-filter]')
+        ).map((button) => [button.value, button.getAttribute('aria-pressed') === 'true']));
+        currentCharacters.querySelectorAll('[data-character-filter]')
+            .forEach((button) => {
+                const fresh = nextCharacters.querySelector(
+                    `[data-character-filter][value="${CSS.escape(button.value)}"]`
+                );
+                if (!fresh) return;
+                const selected = nextSelected.get(button.value);
+                button.setAttribute('aria-pressed', String(selected));
+                button.classList.toggle('is-selected', selected);
+                button.title = fresh.title;
+                button.innerHTML = fresh.innerHTML;
+            });
+    }
+    const currentCharacterTrigger = current.querySelector(
+        '[aria-controls="character-filter-panel"]'
+    );
+    const nextCharacterTrigger = next.querySelector(
+        '[aria-controls="character-filter-panel"]'
+    );
+    if (currentCharacterTrigger && nextCharacterTrigger) {
+        currentCharacterTrigger.textContent = nextCharacterTrigger.textContent;
+        currentCharacterTrigger.className = nextCharacterTrigger.className;
+        currentCharacterTrigger.title = nextCharacterTrigger.title;
+    }
+
+    const currentPaging = current.querySelector('[data-paging-switch]');
+    const nextPaging = next.querySelector('[data-paging-switch]');
+    if (currentPaging && nextPaging) currentPaging.checked = nextPaging.checked;
+
+    const currentMatrix = current.querySelector('[data-cast-matrix]');
+    const nextMatrix = next.querySelector('[data-cast-matrix]');
+    if (currentMatrix && nextMatrix) {
+        const matrixScroll = currentMatrix.closest('.cast-matrix-scroll');
+        const scrollLeft = matrixScroll?.scrollLeft ?? 0;
+        const scrollTop = matrixScroll?.scrollTop ?? 0;
+        const focusedCell = document.activeElement instanceof HTMLButtonElement
+            ? document.activeElement.closest('[data-cast-cell]')?.querySelector('button')
+            : null;
+        const actorLabel = focusedCell?.dataset.actorLabel;
+        const roleLabel = focusedCell?.dataset.roleLabel;
+        currentMatrix.innerHTML = nextMatrix.innerHTML;
+        if (matrixScroll) {
+            matrixScroll.scrollLeft = scrollLeft;
+            matrixScroll.scrollTop = scrollTop;
+        }
+        if (actorLabel !== undefined && roleLabel !== undefined) {
+            Array.from(currentMatrix.querySelectorAll('[data-cast-cell] button'))
+                .find((button) => button.dataset.actorLabel === actorLabel
+                    && button.dataset.roleLabel === roleLabel)
+                ?.focus({ preventScroll: true });
+        }
+    }
+
+    const currentInviteList = current.querySelector('.invite-email-list');
+    const nextInviteList = next.querySelector('.invite-email-list');
+    const focusedInviteForm = document.activeElement instanceof Element
+        ? document.activeElement.closest('.invite-email-row form') : null;
+    const focusedInviteId = focusedInviteForm?.querySelector('[name="invite_id"]')?.value;
+    const focusedInviteAction = focusedInviteForm?.querySelector('[name="action"]')?.value;
+    if (currentInviteList && nextInviteList) {
+        currentInviteList.replaceWith(nextInviteList);
+    } else if (currentInviteList) {
+        currentInviteList.remove();
+    } else if (nextInviteList) {
+        current.querySelector('.invite-email-tools')?.after(nextInviteList);
+    }
+    if (focusedInviteId && focusedInviteAction) {
+        const actionForm = Array.from(
+            current.querySelectorAll('.invite-email-row form')
+        ).find((form) => form.querySelector('[name="invite_id"]')?.value === focusedInviteId
+            && form.querySelector('[name="action"]')?.value === focusedInviteAction);
+        actionForm?.querySelector('button')?.focus({ preventScroll: true });
+    }
+
+    const currentZip = current.querySelector('.zip-export-control');
+    const nextZip = next.querySelector('.zip-export-control');
+    if (currentZip && nextZip) {
+        currentZip.href = nextZip.href;
+    } else if (currentZip) {
+        currentZip.remove();
+    } else if (nextZip) {
+        current.querySelector('.studio-toolbar-actions')?.append(nextZip);
+    }
+
+    current.dataset.revision = next.dataset.revision ?? '';
+    current.dataset.pagingEnabled = next.dataset.pagingEnabled ?? 'off';
+}
+
+/**
+ * Replace one project view from same-origin HTML while preserving active controls.
+ * @param {HTMLElement} root - The persistent project root.
+ * @param {string} requestedUrl - Canonical project URL to fetch.
+ * @param {'push'|'replace'|'none'} historyMode - URL history behavior after success.
+ * @param {boolean} force - Whether to fetch even when revision already matches.
+ * @returns {Promise<boolean>} True when a valid project response was applied.
+ */
+async function refreshProjectView(root, requestedUrl, historyMode, force) {
+    if (activeCaptureCard || hasActiveLinePlayback()) {
+        root.dataset.refreshDeferred = 'true';
+        if (historyMode !== 'none') {
+            queuedProjectRefreshes.set(root, {
+                url: requestedUrl,
+                historyMode,
+                force,
+            });
+            root.dataset.pendingNavigationUrl = requestedUrl;
+        }
+        return false;
+    }
+    if (root.dataset.refreshing === 'true') {
+        queuedProjectRefreshes.set(root, {
+            url: requestedUrl,
+            historyMode,
+            force,
+        });
+        if (historyMode !== 'none') root.dataset.pendingNavigationUrl = requestedUrl;
+        return false;
+    }
+    root.dataset.refreshing = 'true';
+    const target = new URL(requestedUrl, window.location.href);
+    if (historyMode !== 'none') root.dataset.pendingNavigationUrl = target.href;
+    target.searchParams.delete('view');
+    const projectContent = root.querySelector('[data-project-content]');
+    const visibleLine = Array.from(root.querySelectorAll('[data-line-card]'))
+        .find((line) => line.getBoundingClientRect().bottom > 0);
+    const anchorLineId = visibleLine?.dataset.lineId ?? '';
+    const anchorOffset = visibleLine?.getBoundingClientRect().top ?? 0;
+    const previousScrollY = window.scrollY;
+    try {
+        const response = await fetch(target.href, {
+            headers: { Accept: 'text/html' },
+            credentials: 'same-origin',
+            cache: 'no-store',
+        });
+        if (response.status === 401 || response.status === 403) {
+            setProjectStatus(root, 'Přístup vypršel. Obnovte stránku a přihlaste se znovu.');
+            root.dataset.pollPaused = 'true';
+            return false;
+        }
+        if (response.status === 404) {
+            setProjectStatus(root, 'Kniha nebo váš přístup už nejsou dostupné.');
+            root.dataset.pollPaused = 'true';
+            return false;
+        }
+        if (!response.ok) throw new Error('Knihu se nepodařilo obnovit.');
+        const markup = await response.text();
+        const parsed = new DOMParser().parseFromString(markup, 'text/html');
+        const nextRoot = parsed.querySelector('[data-project-live]');
+        const nextContent = nextRoot?.querySelector('[data-project-content]');
+        if (!nextRoot && response.redirected) {
+            setProjectStatus(root, 'Přihlášení vypršelo. Přihlaste se znovu.');
+            root.dataset.pollPaused = 'true';
+            return false;
+        }
+        if (!nextRoot || !nextContent || !projectContent
+            || nextRoot.dataset.projectId !== root.dataset.projectId) {
+            throw new Error('Server nevrátil zobrazení této knihy.');
+        }
+        if (!force && nextRoot.dataset.revision === root.dataset.revision) {
+            return false;
+        }
+        if (activeCaptureCard || hasActiveLinePlayback()) {
+            root.dataset.refreshDeferred = 'true';
+            if (historyMode !== 'none') {
+                queuedProjectRefreshes.set(root, {
+                    url: target.href,
+                    historyMode,
+                    force,
+                });
+            }
+            return false;
+        }
+
+        const oldMaster = projectContent.querySelector('.master-player');
+        const newMaster = nextContent.querySelector('.master-player');
+        if (oldMaster && newMaster) newMaster.replaceWith(oldMaster);
+        const oldPlaylist = projectContent.querySelector('[data-playlist]');
+        const newPlaylist = nextContent.querySelector('[data-playlist]');
+        if (oldPlaylist && newPlaylist) {
+            const listScroll = oldPlaylist.scrollTop;
+            const focusedItem = document.activeElement instanceof Element
+                ? document.activeElement.closest('[data-play-item]')?.dataset.recordingId
+                : null;
+            oldPlaylist.replaceChildren(...Array.from(newPlaylist.childNodes));
+            oldPlaylist.scrollTop = listScroll;
+            newPlaylist.replaceWith(oldPlaylist);
+            if (focusedItem) {
+                oldPlaylist.querySelector(
+                    `[data-recording-id="${CSS.escape(focusedItem)}"]`
+                )?.focus({ preventScroll: true });
+            }
+        }
+        preserveProjectLineControls(projectContent, nextContent);
+        projectContent.replaceWith(nextContent);
+        syncProjectShell(root, nextRoot);
+        if (historyMode !== 'none') {
+            const visibleUrl = target.pathname + target.search + target.hash;
+            window.history[historyMode + 'State'](null, '', visibleUrl);
+        }
+        if (target.searchParams.has('paging')) {
+            try {
+                localStorage.setItem(
+                    `dabing:paging:${root.dataset.accountId}:${root.dataset.projectId}`,
+                    target.searchParams.get('paging') === 'on' ? 'on' : 'off'
+                );
+            } catch (error) {
+                // The URL remains authoritative when browser storage is unavailable.
+            }
+        }
+        bindPanelTriggers(nextContent);
+        bindRecorderNodes(nextContent);
+        bindDeferredAudioRefresh(root, nextContent);
+        bindPlaylist();
+        delete root.dataset.refreshDeferred;
+        const restoredLine = anchorLineId
+            ? root.querySelector(`[data-line-id="${CSS.escape(anchorLineId)}"]`)
+            : null;
+        if (restoredLine) {
+            window.scrollBy(0, restoredLine.getBoundingClientRect().top - anchorOffset);
+        } else {
+            window.scrollTo(0, previousScrollY);
+        }
+        const playlistLineId = root.dataset.pendingPlaylistLineId;
+        if (playlistLineId) {
+            const playlistLine = document.getElementById(
+                `line-${playlistLineId}`
+            );
+            if (playlistLine && root.contains(playlistLine)) {
+                playlistLine.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                delete root.dataset.pendingPlaylistLineId;
+            }
+        }
+        root.dataset.lastUrl = target.href;
+        if (root.dataset.pendingNavigationUrl === target.href) {
+            delete root.dataset.pendingNavigationUrl;
+        }
+        return true;
+    } catch (error) {
+        setProjectStatus(
+            root,
+            error instanceof Error ? error.message : 'Knihu se nepodařilo obnovit.'
+        );
+        return false;
+    } finally {
+        delete root.dataset.refreshing;
+        const queued = queuedProjectRefreshes.get(root);
+        if (queued && root.dataset.pollPaused !== 'true'
+            && !activeCaptureCard && !hasActiveLinePlayback()) {
+            queuedProjectRefreshes.delete(root);
+            window.setTimeout(() => {
+                void refreshProjectView(
+                    root,
+                    queued.url,
+                    queued.historyMode,
+                    queued.force
+                );
+            }, 0);
+        }
+    }
+}
+
+/**
+ * Start account-scoped paging persistence, async book actions and revision polling.
+ * @param {HTMLElement} root - The authenticated project root.
+ * @returns {void} In-book navigation and shared updates use scoped HTML requests.
+ */
+function bindProjectLive(root) {
+    if (root.dataset.liveBound === 'true') return;
+    root.dataset.liveBound = 'true';
+    const projectId = root.dataset.projectId ?? '';
+    const accountId = root.dataset.accountId ?? '';
+    const storageKey = `dabing:paging:${accountId}:${projectId}`;
+    const currentUrl = new URL(window.location.href);
+    const hasPaging = currentUrl.searchParams.has('paging');
+    const legacyPagedUrl = !hasPaging
+        && /^\d+$/.test(currentUrl.searchParams.get('page') ?? '')
+        && Number(currentUrl.searchParams.get('page')) > 0;
+    let wantedPaging = currentUrl.searchParams.get('paging') === 'on'
+        ? 'on' : 'off';
+    if (!hasPaging && !legacyPagedUrl) {
+        try {
+            wantedPaging = localStorage.getItem(storageKey) === 'on' ? 'on' : 'off';
+        } catch (error) {
+            wantedPaging = 'off';
+        }
+    } else if (legacyPagedUrl) {
+        wantedPaging = 'on';
+    }
+    currentUrl.searchParams.set('paging', wantedPaging);
+    window.history.replaceState(
+        null, '', currentUrl.pathname + currentUrl.search + currentUrl.hash
+    );
+    root.dataset.lastUrl = currentUrl.href;
+    const pagingSwitch = root.querySelector('[data-paging-switch]');
+    if (pagingSwitch) pagingSwitch.checked = wantedPaging === 'on';
+    if (root.dataset.pagingEnabled !== wantedPaging) {
+        void refreshProjectView(root, currentUrl.href, 'none', true);
+    } else {
+        try {
+            localStorage.setItem(storageKey, wantedPaging);
+        } catch (error) {
+            // Paging remains available in the canonical URL.
+        }
+    }
+
+    document.addEventListener('click', (event) => {
+        if (!(event.target instanceof Element)) return;
+        const link = event.target.closest('a[data-project-nav]');
+        if (!link || !root.contains(link) || event.button !== 0
+            || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        if (activeCaptureCard) {
+            setProjectStatus(root, activeCaptureCard
+                ? 'Nejdřív dokončete nebo uložte rozpracovanou nahrávku.'
+                : 'Po skončení přehrávání můžete změnit zobrazení.');
+            return;
+        }
+        const linkedFilter = new URL(link.href).searchParams.get('filter') ?? '';
+        if (['all', 'mine'].includes(linkedFilter)) {
+            root.querySelectorAll('[data-character-filter]').forEach((button) => {
+                button.setAttribute('aria-pressed', 'false');
+                button.classList.remove('is-selected');
+            });
+            const target = new URL(root.dataset.pendingNavigationUrl || link.href);
+            target.searchParams.set('filter', linkedFilter);
+            target.searchParams.delete('characters[]');
+            target.searchParams.delete('page');
+            void refreshProjectView(root, target.href, 'push', true);
+            return;
+        }
+        void refreshProjectView(root, link.href, 'push', true);
+    });
+    document.addEventListener('click', (event) => {
+        if (!(event.target instanceof Element)) return;
+        const characterButton = event.target.closest('button[data-character-filter]');
+        if (characterButton && root.contains(characterButton)) {
+            const selectedNames = new Set(Array.from(
+                root.querySelectorAll('[data-character-filter][aria-pressed="true"]')
+            ).map((button) => button.value));
+            const wasSelected = selectedNames.has(characterButton.value);
+            if (wasSelected) selectedNames.delete(characterButton.value);
+            else selectedNames.add(characterButton.value);
+            characterButton.setAttribute('aria-pressed', String(!wasSelected));
+            characterButton.classList.toggle('is-selected', !wasSelected);
+            const selected = Array.from(selectedNames);
+            const target = new URL(
+                root.dataset.pendingNavigationUrl || window.location.href
+            );
+            target.searchParams.delete('page');
+            target.searchParams.delete('characters[]');
+            if (selected.length === 0) {
+                target.searchParams.set('filter', 'all');
+            } else {
+                target.searchParams.set('filter', 'characters');
+                selected.forEach((character) => {
+                    target.searchParams.append('characters[]', character);
+                });
+            }
+            if (activeCaptureCard) {
+                setProjectStatus(root, activeCaptureCard
+                    ? 'Nejdřív dokončete nebo uložte rozpracovanou nahrávku.'
+                    : 'Po skončení přehrávání můžete změnit zobrazení.');
+                characterButton.setAttribute('aria-pressed', String(wasSelected));
+                characterButton.classList.toggle('is-selected', wasSelected);
+                return;
+            }
+            void refreshProjectView(root, target.href, 'push', true);
+            return;
+        }
+    });
+    document.addEventListener('change', (event) => {
+        if (!(event.target instanceof HTMLInputElement) || !root.contains(event.target)) return;
+        if (!event.target.matches('[data-paging-switch]')) return;
+        if (activeCaptureCard) {
+            setProjectStatus(root, activeCaptureCard
+                ? 'Nejdřív dokončete nebo uložte rozpracovanou nahrávku.'
+                : 'Po skončení přehrávání můžete změnit zobrazení.');
+            event.target.checked = !event.target.checked;
+            return;
+        }
+        const target = new URL(
+            root.dataset.pendingNavigationUrl || window.location.href
+        );
+        target.searchParams.set('paging', event.target.checked ? 'on' : 'off');
+        target.searchParams.delete('page');
+        void refreshProjectView(root, target.href, 'push', true);
+    });
+    document.addEventListener('submit', async (event) => {
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement)
+            || !form.matches('[data-project-async]') || !root.contains(form)) return;
+        event.preventDefault();
+        if (form.dataset.pending === 'true') return;
+        form.dataset.pending = 'true';
+        const submitter = event.submitter instanceof HTMLButtonElement
+            ? event.submitter : null;
+        submitter?.setAttribute('aria-busy', 'true');
+        const formStatus = form.closest('[data-panel]')?.querySelector(
+            '[data-panel-status]'
+        );
+        const say = (message) => {
+            if (formStatus) formStatus.textContent = message;
+            setProjectStatus(root, message);
+        };
+        try {
+            const response = await fetch(form.action, {
+                method: 'POST',
+                body: new FormData(form),
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+            });
+            let result;
+            try {
+                result = await response.json();
+            } catch (error) {
+                throw new Error('Server nevrátil potvrzení změny.');
+            }
+            if (!response.ok || result.ok !== true) {
+                throw new Error(result.message ?? 'Změnu se nepodařilo uložit.');
+            }
+            say(result.message ?? 'Změna byla uložena.');
+            window.dispatchEvent(new Event('dabing:project-refresh'));
+        } catch (error) {
+            say(error instanceof Error
+                ? error.message : 'Změnu se nepodařilo uložit.');
+        } finally {
+            delete form.dataset.pending;
+            submitter?.removeAttribute('aria-busy');
+        }
+    });
+    window.addEventListener('popstate', () => {
+        if (activeCaptureCard) {
+            window.history.pushState(null, '', root.dataset.lastUrl ?? window.location.href);
+            setProjectStatus(root, 'Nejdřív dokončete nebo uložte rozpracovanou nahrávku.');
+            return;
+        }
+        void refreshProjectView(root, window.location.href, 'none', true);
+    });
+    window.addEventListener('dabing:project-refresh', () => {
+        if (!activeCaptureCard && !hasActiveLinePlayback()) {
+            delete root.dataset.refreshDeferred;
+        }
+        const queued = queuedProjectRefreshes.get(root);
+        if (queued) {
+            queuedProjectRefreshes.delete(root);
+            void refreshProjectView(
+                root, queued.url, queued.historyMode, queued.force
+            );
+            return;
+        }
+        void refreshProjectView(
+            root,
+            root.dataset.pendingNavigationUrl || root.dataset.lastUrl
+                || window.location.href,
+            'none',
+            true
+        );
+    });
+
+    let pollTimer = null;
+    let polling = false;
+    const schedulePoll = () => {
+        if (pollTimer !== null) window.clearTimeout(pollTimer);
+        if (root.dataset.pollPaused === 'true'
+            || document.visibilityState !== 'visible') return;
+        pollTimer = window.setTimeout(checkRevision, PROJECT_POLL_INTERVAL_MS);
+    };
+    const checkRevision = async () => {
+        if (polling || document.visibilityState !== 'visible'
+            || root.dataset.refreshing === 'true') {
+            schedulePoll();
+            return;
+        }
+        polling = true;
+        try {
+            const probe = new URL(window.location.href);
+            probe.searchParams.set('view', 'revision');
+            const response = await fetch(probe.href, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+            if (response.status === 401 || response.status === 403) {
+                setProjectStatus(root, 'Přístup vypršel. Obnovte stránku a přihlaste se znovu.');
+                root.dataset.pollPaused = 'true';
+                return;
+            }
+            if (response.status === 404) {
+                setProjectStatus(root, 'Kniha nebo váš přístup už nejsou dostupné.');
+                root.dataset.pollPaused = 'true';
+                return;
+            }
+            if (!response.headers.get('content-type')?.includes('application/json')) {
+                setProjectStatus(root, 'Přihlášení vypršelo. Přihlaste se znovu.');
+                root.dataset.pollPaused = 'true';
+                return;
+            }
+            const result = await response.json();
+            if (response.ok && result.ok === true
+                && typeof result.revision === 'string'
+                && result.revision !== root.dataset.revision) {
+                if (activeCaptureCard || hasActiveLinePlayback()) {
+                    root.dataset.refreshDeferred = 'true';
+                } else {
+                    await refreshProjectView(root, window.location.href, 'none', true);
+                }
+            }
+        } catch (error) {
+            setProjectStatus(root, 'Aktualizace knihy je dočasně nedostupná.');
+        } finally {
+            polling = false;
+            schedulePoll();
+        }
+    };
+    document.addEventListener('visibilitychange', schedulePoll);
+    schedulePoll();
 }
 
 document.querySelectorAll('[data-script-form]').forEach(bindScriptImport);
 bindPlaylist();
-window.addEventListener('pageshow', (event) => {
-    if (event.persisted && savedPageNeedsRefresh) window.location.reload();
+document.querySelectorAll('[data-project-live]').forEach((root) => {
+    const content = root.querySelector('[data-project-content]');
+    if (content) bindDeferredAudioRefresh(root, content);
+    bindProjectLive(root);
 });
