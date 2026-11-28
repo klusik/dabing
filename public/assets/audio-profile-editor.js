@@ -63,13 +63,14 @@ async function loadEditorModules() {
 function initialize(modules) {
     const {renderProfilePreview} = modules.analysis;
     const {drawEffectPreview, describeEqBand, formatPreviewNumber} = modules.charts;
-    const {renderAudioEffects} = modules.engine;
+    const {renderAudioEffects, hasAudioEffects} = modules.engine;
     const state = {
         chain: readChain(root.dataset.chain), blob: null, sourceUrl: '', renderUrl: '',
         audioContext: null, mediaSource: null, analyser: null, peaks: null,
         smoothing: 8, selectedEffect: 0, selectedEqBand: 1,
         previewMode: 'none', stages: null, stale: false, renderToken: 0,
         processing: false, processedActive: false, stoppedByAction: false,
+        programmaticPlay: false, auditionHasEffects: false,
     };
     const list = root.querySelector('[data-effect-list]');
     const panel = root.querySelector('[data-effect-editor]');
@@ -562,6 +563,16 @@ function initialize(modules) {
         parent.append(field);
     }
 
+    /** Describe the audio currently loaded by the editor player.
+     * @returns {string} Names processed audio accurately, including dry fallback.
+     */
+    function playbackStatus() {
+        if (state.previewMode === 'original') return 'Přehrává se originál.';
+        return state.auditionHasEffects
+            ? 'Přehrává se efektovaný zvuk.'
+            : 'Přehrává se originál bez aktivních efektů.';
+    }
+
     /** Replace old preview stage after the user requests a processed audition.
      * @returns {Promise<void>} Analyzes and starts processed playback.
      */
@@ -570,6 +581,7 @@ function initialize(modules) {
         const token = ++state.renderToken;
         const chainSnapshot = structuredClone(state.chain);
         const chainJson = JSON.stringify(chainSnapshot);
+        state.auditionHasEffects = hasAudioEffects(chainSnapshot);
         state.processing = true;
         state.stoppedByAction = false;
         setProcessedActive(true);
@@ -586,16 +598,17 @@ function initialize(modules) {
             state.stages = result.stages;
             state.stale = JSON.stringify(state.chain) !== chainJson;
             if (state.renderUrl) URL.revokeObjectURL(state.renderUrl);
-            state.renderUrl = URL.createObjectURL(wav(result.audio));
+            state.renderUrl = state.auditionHasEffects
+                ? URL.createObjectURL(wav(result.audio)) : '';
             state.previewMode = 'processed';
-            player.src = state.renderUrl;
+            player.src = state.auditionHasEffects ? state.renderUrl : state.sourceUrl;
             player.currentTime = 0;
             drawSelectedPreview();
             const started = await playAndAnalyze(token);
             if (!started || token !== state.renderToken) return;
             state.processing = false;
             drawSelectedPreview();
-            status.textContent = 'Přehrává se efektovaný zvuk.';
+            status.textContent = playbackStatus();
         } catch (error) {
             if (token === state.renderToken) {
                 state.processing = false;
@@ -629,6 +642,7 @@ function initialize(modules) {
             if (token !== state.renderToken) return;
             state.stages = result.stages;
             state.previewMode = 'original';
+            state.auditionHasEffects = false;
             state.stale = false;
             player.src = state.sourceUrl;
             player.currentTime = 0;
@@ -664,7 +678,12 @@ function initialize(modules) {
         await state.audioContext.resume();
         if (token !== state.renderToken) return false;
         const source = player.src;
-        await player.play();
+        state.programmaticPlay = true;
+        try {
+            await player.play();
+        } finally {
+            state.programmaticPlay = false;
+        }
         if (token !== state.renderToken || player.src !== source) {
             return false;
         }
@@ -771,6 +790,7 @@ function initialize(modules) {
         state.sourceUrl = url;
         state.renderUrl = '';
         state.previewMode = 'none';
+        state.auditionHasEffects = false;
         state.stages = null;
         state.stale = false;
         player.src = url;
@@ -873,14 +893,23 @@ function initialize(modules) {
         });
         player.addEventListener('play', () => {
             if (player.paused) return;
+            if (state.programmaticPlay) {
+                state.programmaticPlay = false;
+            } else if (state.processing) {
+                player.pause();
+                return;
+            } else if (state.blob && (
+                state.previewMode === 'none'
+                || (state.previewMode === 'processed' && state.stale)
+            )) {
+                player.pause();
+                void playProcessed();
+                return;
+            }
             state.stoppedByAction = false;
             if (state.previewMode === 'processed') setProcessedActive(true);
             drawSelectedPreview();
-            if (state.previewMode !== 'none') {
-                status.textContent = state.previewMode === 'original'
-                    ? 'Přehrává se originál.'
-                    : 'Přehrává se efektovaný zvuk.';
-            }
+            if (state.previewMode !== 'none') status.textContent = playbackStatus();
         });
         player.addEventListener('playing', () => {
             if (player.paused) return;

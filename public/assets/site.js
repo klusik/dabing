@@ -1130,6 +1130,12 @@ function bindScriptImport(form) {
  * Play selected takes as one ordered audiobook and support manual next/previous.
  * @returns {void} The selected clips play in script order through one audio element.
  */
+/** Master-player resume margin that avoids seeking exactly to media end.
+ * Type: number; Units: seconds; Scope: source replacement resume; Consumers: playIndex().
+ * Rationale: Resume near end without immediately triggering the ended event.
+ * Value: 0.05 seconds.
+ */
+const MASTER_SEEK_END_MARGIN_SECONDS = 0.05;
 let playlistDocumentHandlersBound = false;
 
 /**
@@ -1141,7 +1147,10 @@ function bindPlaylist() {
     if (!(player instanceof HTMLAudioElement)) return;
     let state = playlistStates.get(player);
     if (!state) {
-        state = { currentId: '', currentIndex: -1, initialized: false };
+        state = {
+            currentId: '', currentIndex: -1, initialized: false,
+            playbackAttempt: 0, internalPauses: new WeakSet(),
+        };
         playlistStates.set(player, state);
     }
     const items = () => Array.from(document.querySelectorAll('[data-play-item]'));
@@ -1168,26 +1177,126 @@ function bindPlaylist() {
         root.dataset.pendingPlaylistLineId = lineId;
         void refreshProjectView(root, target.href, 'push', true);
     };
-    const playIndex = async (index, shouldPlay) => {
+    /** Resolve and play one playlist entry, discarding superseded async work.
+     * @param {number} index - Zero-based position in the current playlist.
+     * @param {boolean} shouldPlay - Whether to resolve effects and start playback.
+     * @param {number|null} resumeAt - Optional position restored after source replacement.
+     * @returns {Promise<void>} Resolves after guarded playback setup or failure reporting.
+     */
+    const playIndex = async (index, shouldPlay, resumeAt = null) => {
         const currentItems = items();
         if (index < 0 || index >= currentItems.length) return;
         const item = currentItems[index];
+        const attempt = ++state.playbackAttempt;
         state.currentIndex = index;
         state.currentId = item.dataset.recordingId ?? item.dataset.src ?? '';
         const playbackId = state.currentId;
+        player.dataset.currentPlaybackId = playbackId;
         let source = item.dataset.src ?? '';
-        try {
-            if (typeof window.dabingAudioPlaybackUrl === 'function') {
+        if (shouldPlay) {
+            try {
+                if (typeof window.dabingAudioPlaybackUrl !== 'function') {
+                    await new Promise((resolve, reject) => {
+                        const cleanup = () => {
+                            window.removeEventListener('dabing:audio-profile-ready', ready);
+                            document.removeEventListener('DOMContentLoaded', documentReady);
+                        };
+                        const ready = () => { cleanup(); resolve(); };
+                        const documentReady = () => {
+                            cleanup();
+                            if (typeof window.dabingAudioPlaybackUrl === 'function') resolve();
+                            else reject(new Error(
+                                'Zpracování zvuku není dostupné. Obnovte stránku a zkuste to znovu.'
+                            ));
+                        };
+                        window.addEventListener('dabing:audio-profile-ready', ready, { once: true });
+                        if (document.readyState !== 'complete') {
+                            document.addEventListener('DOMContentLoaded', documentReady, { once: true });
+                        } else {
+                            queueMicrotask(documentReady);
+                        }
+                    });
+                }
+                if (attempt !== state.playbackAttempt || playbackId !== state.currentId) return;
+                if (typeof window.dabingAudioPlaybackUrl !== 'function') {
+                    throw new Error(
+                        'Zpracování zvuku není dostupné. Obnovte stránku a zkuste to znovu.'
+                    );
+                }
                 source = await window.dabingAudioPlaybackUrl(item);
+            } catch (error) {
+                if (attempt !== state.playbackAttempt) return;
+                if (status()) status().textContent = error instanceof Error
+                    ? error.message : 'Zvukové efekty se nepodařilo zpracovat.';
+                return;
             }
-        } catch (error) {
-            if (status()) status().textContent = error instanceof Error
-                ? error.message : 'Zvukové efekty se nepodařilo zpracovat.';
-            return;
+            if (attempt !== state.playbackAttempt || playbackId !== state.currentId) return;
+            const latestItems = items();
+            const latestItem = latestItems.find((candidate) =>
+                (candidate.dataset.recordingId ?? candidate.dataset.src ?? '') === playbackId
+            );
+            if (!latestItem) return;
+            if (latestItem !== item) {
+                void playIndex(latestItems.indexOf(latestItem), shouldPlay, resumeAt);
+                return;
+            }
         }
-        if (playbackId !== state.currentId) return;
-        player.src = source;
-        player.load();
+        if (attempt !== state.playbackAttempt || playbackId !== state.currentId) return;
+        const targetSource = new URL(source, document.baseURI).href;
+        const currentSource = player.currentSrc || player.src;
+        const sourceMatches = currentSource === targetSource;
+        if (resumeAt === null || !sourceMatches) {
+            if (!player.paused) {
+                state.internalPauses.add(player);
+                player.pause();
+            }
+            if (resumeAt !== null && !sourceMatches) {
+                try {
+                    await new Promise((resolve, reject) => {
+                        const cleanup = () => {
+                            player.removeEventListener('loadedmetadata', onLoaded);
+                            player.removeEventListener('error', onError);
+                        };
+                        const onLoaded = () => { cleanup(); resolve(); };
+                        const onError = () => {
+                            cleanup();
+                            reject(new Error('Přehrání upravené nahrávky se nepodařilo načíst.'));
+                        };
+                        player.addEventListener('loadedmetadata', onLoaded, { once: true });
+                        player.addEventListener('error', onError, { once: true });
+                        player.src = source;
+                        player.load();
+                    });
+                } catch (error) {
+                    if (attempt === state.playbackAttempt && status()) {
+                        status().textContent = error instanceof Error
+                            ? error.message : 'Přehrání nahrávky se nepodařilo načíst.';
+                    }
+                    return;
+                }
+                if (attempt !== state.playbackAttempt || playbackId !== state.currentId) return;
+                const postLoadItem = items().find((candidate) =>
+                    (candidate.dataset.recordingId ?? candidate.dataset.src ?? '') === playbackId
+                );
+                if (postLoadItem !== item) return;
+                if (Number.isFinite(player.duration)) {
+                    player.currentTime = Math.min(
+                        Math.max(0, resumeAt),
+                        Math.max(0, player.duration - MASTER_SEEK_END_MARGIN_SECONDS)
+                    );
+                }
+            } else {
+                player.src = source;
+                player.load();
+            }
+        }
+        if (shouldPlay) {
+            player.dataset.audioPlaybackSignature = item.dataset.audioPlaybackSignature ?? '';
+        } else {
+            delete player.dataset.audioPlaybackSignature;
+        }
+        player.dataset.audioPlaybackId = playbackId;
+        player.dataset.audioPlaybackSource = targetSource;
         const currentStatus = status();
         if (currentStatus) {
             currentStatus.textContent = item.dataset.label ?? 'Vybraná replika';
@@ -1208,6 +1317,46 @@ function bindPlaylist() {
     };
     if (!player.dataset.playlistBound) {
         player.dataset.playlistBound = 'true';
+        player.addEventListener('pause', () => {
+            if (state.internalPauses.has(player)) {
+                state.internalPauses.delete(player);
+                return;
+            }
+            state.playbackAttempt += 1;
+        });
+        player.addEventListener('play', () => {
+            const currentItems = items();
+            const currentId = player.dataset.currentPlaybackId ?? state.currentId;
+            let index = currentItems.findIndex((item) =>
+                (item.dataset.recordingId ?? item.dataset.src ?? '') === currentId
+            );
+            const sameTrack = index >= 0;
+            if (index < 0 && currentItems.length > 0) index = 0;
+            if (index < 0) {
+                if (!player.paused) {
+                    state.internalPauses.add(player);
+                    player.pause();
+                }
+                if (status()) status().textContent = 'V seznamu není dostupná žádná nahrávka.';
+                return;
+            }
+            const item = currentItems[index];
+            const expectedSource = player.dataset.audioPlaybackSource ?? '';
+            const currentSource = player.src || player.currentSrc;
+            const sourceMatches = expectedSource !== ''
+                && currentSource === expectedSource;
+            const signatureMatches = item.dataset.audioPlaybackSignature !== undefined
+                && player.dataset.audioPlaybackSignature === item.dataset.audioPlaybackSignature;
+            if (sameTrack && sourceMatches && signatureMatches
+                && player.dataset.audioPlaybackId === currentId) return;
+            const resumeAt = sameTrack && Number.isFinite(player.currentTime)
+                ? player.currentTime : null;
+            if (!player.paused) {
+                state.internalPauses.add(player);
+                player.pause();
+            }
+            void playIndex(index, true, resumeAt);
+        });
         player.addEventListener('ended', () => {
             const currentItems = items();
             if (state.currentIndex >= 0
