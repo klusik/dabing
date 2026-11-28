@@ -35,23 +35,34 @@ final class AudioProfileController
         $this->service = new AudioProfileService($this->model);
     }
 
-    /** Show the global profile editor or save one profile.
-     * @return void Sends a rendered page or redirects after a successful save.
+    /** Show the global or embedded profile editor, or save one profile.
+     * @return void Sends the editor or redirects after save. Embedded
+     * redirects retain authorized sample and embed state.
      */
     public function handle(): void
     {
         $this->requireAdmin();
         if (Http::method() === 'POST') {
             Http::requireCsrf();
+            $embedded = Http::post('embed') === '1';
             $id = Http::postId('profile_id');
+            $sampleId = Http::postId('sample');
+
+            if ($embedded && $sampleId === null) {
+                throw new HttpError(404, 'Nahrávka nebyla nalezena.');
+            }
+            if ($sampleId !== null && (new StudioModel($this->database))
+                ->recordingForUser($sampleId, (int) $this->user['id'], true) === null) {
+                throw new HttpError(404, 'Nahrávka nebyla nalezena.');
+            }
             $raw = Http::post('chain');
             try {
                 $chain = json_decode($raw, true, 16, JSON_THROW_ON_ERROR);
             } catch (\JsonException) {
                 $this->renderEditor(
-                    $id, Http::postId('sample'),
+                    $id, $sampleId,
                     'Řetězec zvukových modulů není platný.',
-                    Http::post('name'), $raw
+                    Http::post('name'), $raw, $embedded
                 );
                 return;
             }
@@ -59,43 +70,57 @@ final class AudioProfileController
                 $savedId = $this->service->save($id, Http::post('name'), $chain);
             } catch (FormError $error) {
                 $this->renderEditor(
-                    $id, Http::postId('sample'), $error->getMessage(),
-                    Http::post('name'), $raw
+                    $id, $sampleId, $error->getMessage(),
+                    Http::post('name'), $raw, $embedded
                 );
                 return;
             }
             Http::notice('success', 'Zvukový profil byl uložen.');
             $params = ['id' => $savedId];
-            $sampleId = Http::postId('sample');
             if ($sampleId !== null) {
                 $params['sample'] = $sampleId;
+            }
+            if ($embedded) {
+                $params['embed'] = '1';
+                $params['saved'] = '1';
             }
             Http::redirect('audio-profiles', $params);
         }
         if (Http::method() !== 'GET') {
             throw new HttpError(405, 'Metoda není podporována.');
         }
-        $this->renderEditor(Http::queryId('id'), Http::queryId('sample'));
+        $embedded = Http::query('embed') === '1';
+        $this->renderEditor(
+            Http::queryId('id'), Http::queryId('sample'), null, null, null,
+            $embedded, $embedded && Http::query('saved') === '1'
+        );
     }
-
     /** Render editor data and validate the requested sample's project access.
      * @param int|null $profileId Profile identifier being edited.
      * @param int|null $sampleId Recording identifier for an optional preview.
      * @param string|null $formError Validation message to display.
      * @param string|null $submittedName Submitted name preserved after validation.
      * @param string|null $submittedChainJson Submitted JSON preserved after validation.
-     * @return void Renders the profile editor.
+     * @param bool $embedded Whether to render the same-origin iframe child.
+     * @param bool $saved Whether the embedded profile was just saved.
+     * @return void Renders the editor; only validated embedded samples permit
+     * same-origin framing.
      */
     private function renderEditor(
         ?int $profileId,
         ?int $sampleId,
         ?string $formError = null,
         ?string $submittedName = null,
-        ?string $submittedChainJson = null
+        ?string $submittedChainJson = null,
+        bool $embedded = false,
+        bool $saved = false
     ): void {
         $profile = $profileId === null ? null : $this->model->profile($profileId);
         if ($profileId !== null && $profile === null) {
             throw new HttpError(404, 'Zvukový profil nebyl nalezen.');
+        }
+        if ($embedded && $sampleId === null) {
+            throw new HttpError(404, 'Nahrávka nebyla nalezena.');
         }
         $sample = null;
         if ($sampleId !== null) {
@@ -107,12 +132,16 @@ final class AudioProfileController
             }
             $sample = [
                 'id' => $sampleId,
+                'project_id' => (int) $recording['project_id'],
                 'url' => Http::url('audio', ['id' => $sampleId]),
                 'label' => TakeNaming::fileName(
                     $recording['project_title'], $recording['line_number'],
                     $recording['attempt_no'], $recording['media_type']
                 ),
             ];
+        }
+        if ($embedded) {
+            Http::allowSameOriginFraming();
         }
         Http::render('audio-profiles', 'Zvukové profily', [
             'profiles' => $this->model->profiles(),
@@ -123,9 +152,10 @@ final class AudioProfileController
             'submitted_name' => $submittedName,
             'submitted_chain_json' => $submittedChainJson,
             'profile_id' => $profileId,
+            'embedded' => $embedded,
+            'audio_profile_saved' => $embedded && $saved,
         ], $this->user);
     }
-
     /** Assign, clear, or suppress a profile at a project scope.
      * @return void Sends JSON for fetch clients or redirects for form posts.
      */

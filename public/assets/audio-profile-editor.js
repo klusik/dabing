@@ -875,6 +875,7 @@ function initialize(modules) {
             const url = new URL(location.href);
             if (event.currentTarget.value) url.searchParams.set('id', event.currentTarget.value);
             else url.searchParams.delete('id');
+            url.searchParams.delete('saved');
             location.assign(url);
         });
         root.querySelector('[data-local-audio]').addEventListener('change', loadFile);
@@ -948,6 +949,7 @@ function initialize(modules) {
         syncForm();
         const url = new URL(location.href);
         url.searchParams.delete('id');
+        url.searchParams.delete('saved');
         history.replaceState({}, '', url);
     }
 

@@ -1880,6 +1880,124 @@ async function refreshProjectView(root, requestedUrl, historyMode, force, scroll
 }
 
 /**
+ * Bind the persistent take-sample dialog without changing the book location.
+ * @param {HTMLElement} root - Persistent project shell outside replaceable content.
+ * @returns {void} Sample links retain their normal navigation as a fallback.
+ */
+function bindProfilePreviewDialog(root) {
+    const dialog = root.querySelector('[data-profile-preview-dialog]');
+    const frame = dialog?.querySelector('[data-profile-preview-frame]');
+    const closeButton = dialog?.querySelector('[data-profile-preview-close]');
+    if (!dialog || !frame || !closeButton || dialog.dataset.bound === 'true') return;
+    dialog.dataset.bound = 'true';
+    let opener = null;
+    let openerRecordingId = '';
+    let savedInThisOpen = false;
+    let savedObserver = null;
+
+    /** Latch the child editor's save marker before profile navigation replaces it.
+     * @returns {void} The flag persists until this dialog session closes.
+     */
+    function latchSavedState() {
+        try {
+            if (frame.contentDocument?.querySelector('[data-profile-editor]')
+                ?.dataset.audioProfileSaved === 'true') {
+                savedInThisOpen = true;
+            }
+        } catch (error) {
+            // Cross-origin redirects cannot report an embedded save.
+        }
+    }
+
+    /** Close the preview, stop its playback, and refresh saved profile choices.
+     * @returns {void} Refresh runs only after an embedded save was observed.
+     */
+    function closePreview() {
+        if (dialog.open) dialog.close();
+    }
+
+    closeButton.addEventListener('click', closePreview);
+    dialog.addEventListener('click', (event) => {
+        if (event.target === dialog) closePreview();
+    });
+    dialog.addEventListener('cancel', (event) => {
+        event.preventDefault();
+        closePreview();
+    });
+    frame.addEventListener('load', () => {
+        savedObserver?.disconnect();
+        try {
+            const childDocument = frame.contentDocument;
+            const editor = childDocument?.querySelector('[data-profile-editor]');
+            if (editor) {
+                latchSavedState();
+                savedObserver = new MutationObserver(latchSavedState);
+                savedObserver.observe(editor, {
+                    attributes: true,
+                    attributeFilter: ['data-audio-profile-saved'],
+                });
+            }
+            childDocument?.addEventListener('keydown', (event) => {
+                if (event.key !== 'Escape') return;
+                event.preventDefault();
+                closePreview();
+            }, true);
+        } catch (error) {
+            // The link remains navigable if a deployment changes iframe origin.
+        }
+    });
+    dialog.addEventListener('close', () => {
+        latchSavedState();
+        const saved = savedInThisOpen;
+        savedObserver?.disconnect();
+        savedObserver = null;
+        frame.removeAttribute('src');
+        const takeId = openerRecordingId;
+        const ownTrigger = takeId
+            ? root.querySelector(`[data-recording-id="${CSS.escape(takeId)}"] [data-take-audio-profile] [data-panel-trigger]`)
+            : null;
+        const stableBookTrigger = [
+            root.querySelector('.audio-profile-bulk [data-panel-trigger]'),
+            root.querySelector('.workspace-actions a[href="#poslech"]'),
+            root.querySelector('[data-play-item]'),
+        ].find((candidate) => candidate?.getClientRects().length > 0);
+        const openerVisible = opener?.isConnected && opener.getClientRects().length > 0;
+        const ownTriggerVisible = ownTrigger?.isConnected
+            && ownTrigger.getClientRects().length > 0;
+        const focusTarget = saved
+            ? stableBookTrigger
+            : (openerVisible ? opener : (ownTriggerVisible ? ownTrigger : stableBookTrigger));
+        focusTarget?.focus({preventScroll: true});
+        if (saved) window.dispatchEvent(new Event('dabing:project-refresh'));
+        opener = null;
+        openerRecordingId = '';
+        savedInThisOpen = false;
+    });
+    root.addEventListener('click', (event) => {
+        if (!(event.target instanceof Element)) return;
+        const link = event.target.closest('a.take-profile-sample');
+        if (!link || !root.contains(link) || event.defaultPrevented || event.button !== 0
+            || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
+            || link.hasAttribute('download') || link.target && link.target !== '_self') return;
+        const target = new URL(link.href, window.location.href);
+        const sampleId = target.searchParams.get('sample') ?? '';
+        if (target.origin !== window.location.origin
+            || target.searchParams.get('route') !== 'audio-profiles'
+            || !/^[1-9]\d*$/.test(sampleId)
+            || typeof dialog.showModal !== 'function') return;
+        event.preventDefault();
+        target.searchParams.set('embed', '1');
+        opener = link;
+        openerRecordingId = link.closest('[data-recording-id]')?.dataset.recordingId ?? '';
+        savedInThisOpen = false;
+        savedObserver?.disconnect();
+        frame.src = target.href;
+        dialog.showModal();
+        closeButton.focus({preventScroll: true});
+    });
+}
+
+/**
  * Read the latest voice-rule map embedded in the project root.
  * @param {HTMLElement} root - The current project root.
  * @returns {Record<string, Record<string, number>>} Character/user assignments.
@@ -2036,6 +2154,7 @@ function bindProjectLive(root) {
     root.dataset.liveBound = 'true';
     const projectId = root.dataset.projectId ?? '';
     const accountId = root.dataset.accountId ?? '';
+    bindProfilePreviewDialog(root);
     initializeAudioProfilePair(root);
     const storageKey = `dabing:paging:${accountId}:${projectId}`;
     const currentUrl = new URL(window.location.href);

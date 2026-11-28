@@ -144,3 +144,16 @@
 }
 .audio-profile-popover [data-audio-profile-status]:not(:empty) { color: var(--forest-deep, #274536); }
 .audio-profile-popover select:disabled { opacity: .65; }
+
+.audio-profile-trigger { border: 1px solid transparent; background: transparent; font-size: 13px; line-height: 1; }
+.audio-profile-trigger:hover, .audio-profile-trigger:focus-visible { border-color: rgba(49,93,75,.34); background: rgba(255,255,255,.9); }
+.audio-profile-trigger:focus-visible { outline: 2px solid rgba(183,122,53,.78); outline-offset: 1px; }
+
+.take-row.has-audio-profile-control .audio-profile-trigger {
+    width: 22px; min-width: 22px; height: 22px; flex-basis: 22px; font-size: 11px;
+}
+@media (max-width: 680px) {
+    .take-row.has-audio-profile-control .audio-profile-trigger {
+        width: 36px; min-width: 36px; height: 36px; flex-basis: 36px;
+    }
+}
